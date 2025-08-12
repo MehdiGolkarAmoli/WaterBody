@@ -1,4 +1,3 @@
-# Import non-streamlit packages first
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 import numpy as np
@@ -7,7 +6,6 @@ from shapely.geometry import Polygon, mapping, box
 import rasterio
 from rasterio.mask import mask
 from rasterio.warp import calculate_default_transform, reproject, Resampling
-from rasterio.merge import merge
 from patchify import patchify, unpatchify
 import datetime
 import torch
@@ -38,7 +36,7 @@ warnings.filterwarnings("ignore", message="Examining the path of torch.classes")
 import streamlit as st
 
 # Set page configuration - MUST BE THE FIRST STREAMLIT COMMAND
-st.set_page_config(layout="wide", page_title="Satellite Image Analysis Tool")
+st.set_page_config(layout="wide", page_title="Water Body Detection Tool")
 
 # Now import other streamlit-related packages
 import folium
@@ -61,9 +59,9 @@ def download_model_from_gdrive(gdrive_url, local_filename):
     str: Path to the downloaded file or None if download failed
     """
     try:
-        # FIXED: Use the correct file ID from your URL
-        # URL: https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link
-        correct_file_id = "1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov"
+        # Extract file ID from the new URL
+        # URL: https://drive.google.com/file/d/1PwvxqaN7K3OLN8i2cyqqdhS7vburSmkH/view?usp=drive_link
+        correct_file_id = "1PwvxqaN7K3OLN8i2cyqqdhS7vburSmkH"
         
         st.info(f"Downloading model from Google Drive (File ID: {correct_file_id})...")
         
@@ -97,13 +95,13 @@ def download_model_from_gdrive(gdrive_url, local_filename):
                     try:
                         with open(local_filename, 'rb') as f:
                             header = f.read(10)
-                            if header.startswith(b'\x80\x02') or header.startswith(b'\x80\x03') or header.startswith(b'PK'):
-                                st.success(f"Model downloaded successfully! Size: {file_size / (1024*1024):.1f} MB")
-                                return local_filename
-                            else:
-                                st.warning(f"Method {i+1}: Downloaded file doesn't appear to be a valid PyTorch model. Header: {header}")
-                                if os.path.exists(local_filename):
-                                    os.remove(local_filename)
+                        if header.startswith(b'\x80\x02') or header.startswith(b'\x80\x03') or header.startswith(b'PK'):
+                            st.success(f"Model downloaded successfully! Size: {file_size / (1024*1024):.1f} MB")
+                            return local_filename
+                        else:
+                            st.warning(f"Method {i+1}: Downloaded file doesn't appear to be a valid PyTorch model. Header: {header}")
+                            if os.path.exists(local_filename):
+                                os.remove(local_filename)
                     except Exception as e:
                         st.warning(f"Method {i+1}: Error verifying downloaded file: {e}")
                         if os.path.exists(local_filename):
@@ -112,7 +110,7 @@ def download_model_from_gdrive(gdrive_url, local_filename):
                     st.warning(f"Method {i+1}: Downloaded file is empty or doesn't exist")
                     if os.path.exists(local_filename):
                         os.remove(local_filename)
-                        
+                
             except Exception as e:
                 st.warning(f"Download method {i+1} failed: {str(e)}")
                 if os.path.exists(local_filename):
@@ -122,7 +120,7 @@ def download_model_from_gdrive(gdrive_url, local_filename):
         # If all gdown methods failed, try manual requests approach
         st.info("All gdown methods failed. Trying manual download approach...")
         return manual_download_fallback(correct_file_id, local_filename)
-            
+        
     except Exception as e:
         st.error(f"Error in download function: {str(e)}")
         return None
@@ -187,7 +185,7 @@ def manual_download_fallback(file_id, local_filename):
                             return local_filename
                     else:
                         st.warning(f"Method {i+1} returned HTML instead of file")
-                        
+                
             except Exception as e:
                 st.warning(f"Manual method {i+1} failed: {e}")
                 continue
@@ -198,11 +196,11 @@ def manual_download_fallback(file_id, local_filename):
         st.info("**Manual Download Instructions:**")
         st.markdown(f"""
         1. **Open this link in a new browser tab:** 
-           https://drive.google.com/file/d/{file_id}/view
+        https://drive.google.com/file/d/{file_id}/view
         
         2. **If you see a permission error:**
-           - The file owner needs to change sharing to "Anyone with the link can view"
-           - Or you may need to request access
+        - The file owner needs to change sharing to "Anyone with the link can view"
+        - Or you may need to request access
         
         3. **Click the Download button** (usually in the top-right corner)
         
@@ -232,9 +230,9 @@ def manual_download_fallback(file_id, local_filename):
         st.error(f"Manual download fallback failed: {e}")
         return None
 
-# CORRECTED: Updated model loading section with the correct URL and file ID
-gdrive_model_url = "https://drive.google.com/file/d/1m6EScw-mpBIvWV78h4pyjWq1OLQtn2ov/view?usp=drive_link"
-model_path = "best_model_version_Unet++_v02_e7.pt"  # Updated filename to match your preference
+# Updated model loading section with the correct URL and file ID
+gdrive_model_url = "https://drive.google.com/file/d/1PwvxqaN7K3OLN8i2cyqqdhS7vburSmkH/view?usp=drive_link"
+model_path = "best_model.pth"  # Updated filename to match your preference
 
 # Download model if it doesn't exist locally
 if not os.path.exists(model_path):
@@ -258,47 +256,27 @@ if os.path.exists(model_path):
         # Try to load just the header to verify it's a valid PyTorch file
         with open(model_path, 'rb') as f:
             header = f.read(10)
-            if not (header.startswith(b'\x80\x02') or header.startswith(b'\x80\x03') or header.startswith(b'PK')):
-                st.error("The model file appears to be corrupted or invalid.")
-                st.error(f"File header: {header}")
-                st.info("Please re-download the model file.")
-                
-                # Show file content preview for debugging
-                try:
-                    with open(model_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read(200)
-                        st.code(content, language='text')
-                except:
-                    pass
-                
-                os.remove(model_path)
-                st.stop()
-            else:
-                st.success("Model file appears to be valid!")
-                
+        if not (header.startswith(b'\x80\x02') or header.startswith(b'\x80\x03') or header.startswith(b'PK')):
+            st.error("The model file appears to be corrupted or invalid.")
+            st.error(f"File header: {header}")
+            st.info("Please re-download the model file.")
+            
+            # Show file content preview for debugging
+            try:
+                with open(model_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read(200)
+                st.code(content, language='text')
+            except:
+                pass
+            
+            os.remove(model_path)
+            st.stop()
+        else:
+            st.success("Model file appears to be valid!")
+            
     except Exception as e:
         st.error(f"Error verifying model file: {e}")
         st.stop()
-
-# Install GEES2Downloader if not already installed
-try:
-    from geeS2downloader.geeS2downloader import GEES2Downloader
-    st.sidebar.success("GEES2Downloader is already installed.")
-except ImportError:
-    st.sidebar.info("Installing GEES2Downloader...")
-    try:
-        # Install directly from GitHub
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", 
-            "git+https://github.com/cordmaur/GEES2Downloader.git"
-        ])
-        
-        # Import the module
-        from geeS2downloader.geeS2downloader import GEES2Downloader
-        st.sidebar.success("GEES2Downloader installed successfully!")
-    except Exception as e:
-        st.sidebar.error(f"Failed to install GEES2Downloader: {str(e)}")
-        st.sidebar.info("Please manually install GEES2Downloader")
 
 # Initialize Earth Engine with service account from environment variable
 @st.cache_resource
@@ -351,16 +329,17 @@ else:
     1. Create a service account in Google Cloud Console
     2. Generate a JSON key for the service account
     3. Convert the JSON key to base64:
-       ```python
-       import base64
-       with open('your-key.json', 'r') as f:
-           print(base64.b64encode(f.read().encode()).decode())
-       ```
+    ```python
+    import base64
+    with open('your-key.json', 'r') as f:
+        print(base64.b64encode(f.read().encode()).decode())
+    ```
     4. Set this as an environment variable in your Posit Cloud environment
     """)
     st.stop()
+
 # Create tabs for different pages
-tab1, tab2, tab3, tab4  = st.tabs(["Region Selection", "Before Image Analysis", "After Image Analysis", "Change Detection"])
+tab1, tab2 = st.tabs(["Region Selection & Download", "Water Body Detection"])
 
 # Global variables
 if 'drawn_polygons' not in st.session_state:
@@ -371,61 +350,40 @@ if 'last_map_data' not in st.session_state:
 
 if 'clipped_img' not in st.session_state:
     st.session_state.clipped_img = None
-    
-if 'clipped_img_2024' not in st.session_state:
-    st.session_state.clipped_img_2024 = None
 
 if 'model_loaded' not in st.session_state:
     st.session_state.model_loaded = False
     
 if 'saved_patches_paths' not in st.session_state:
     st.session_state.saved_patches_paths = []
-    
-if 'saved_patches_paths_2024' not in st.session_state:
-    st.session_state.saved_patches_paths_2024 = []
 
-if 'change_detection_result' not in st.session_state:
-    st.session_state.change_detection_result = None
+if 'water_detection_result' not in st.session_state:
+    st.session_state.water_detection_result = None
 
-# Define Sentinel-2 bands to use
+# Define Sentinel-2 bands to use for water detection
+WATER_DETECTION_BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']
+WATER_BAND_INDICES = [1, 2, 3, 7, 10, 11]  # 0-indexed positions in S2_BANDS
+
+# All Sentinel-2 bands for download
 S2_BANDS = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']
 S2_NAMES = ['Aerosols', 'Blue', 'Green', 'Red', 'Red Edge 1', 'Red Edge 2', 
-           'Red Edge 3', 'NIR', 'Red Edge 4', 'Water Vapor', 'SWIR1', 'SWIR2']
+            'Red Edge 3', 'NIR', 'Red Edge 4', 'Water Vapor', 'SWIR1', 'SWIR2']
 
-# [Rest of your code continues unchanged from here...]
-# The rest of your functions and code remain exactly the same
-
-# Function to download Sentinel-2 imagery using GEES2Downloader
-def download_sentinel2_with_gees2(year, polygon, start_month, end_month, cloud_cover_limit=10):
+# Function to download Sentinel-2 imagery
+def download_sentinel2_with_gees2(date, polygon, cloud_cover_limit=10):
     """
-    Download Sentinel-2 Level-2A imagery for a specific year and region using GEES2Downloader.
-    
-    Parameters:
-    year (str): Year to download imagery for (e.g., "2021")
-    polygon (shapely.geometry.Polygon): Region of interest
-    start_month (int): Start month (1-12)
-    end_month (int): End month (1-12)
-    cloud_cover_limit (int): Maximum cloud cover percentage
-    
-    Returns:
-    str: Path to the downloaded GeoTIFF file or None if no suitable images found
+    Download Sentinel-2 Level-2A imagery for a specific date and region.
     """
     status_placeholder = st.empty()
     progress_placeholder = st.empty()
     
     try:
-        # Define date ranges for the specified year and months
-        start_date = f"{year}-{start_month:02d}-01"
+        # Parse the date
+        year, month, day = date.split('-')
         
-        # Calculate end date based on month (handle different month lengths)
-        if end_month in [4, 6, 9, 11]:  # 30 days
-            end_day = 30
-        elif end_month == 2:  # February
-            end_day = 29 if int(year) % 4 == 0 else 28  # Simple leap year check
-        else:  # 31 days
-            end_day = 31
-            
-        end_date = f"{year}-{end_month:02d}-{end_day}"
+        # Define date range (±15 days from selected date)
+        start_date = (datetime.datetime.strptime(date, '%Y-%m-%d') - datetime.timedelta(days=15)).strftime('%Y-%m-%d')
+        end_date = (datetime.datetime.strptime(date, '%Y-%m-%d') + datetime.timedelta(days=15)).strftime('%Y-%m-%d')
         
         # Display the region area in square kilometers
         area_sq_km = polygon.area * 111 * 111  # Approximate conversion from degrees to km²
@@ -433,7 +391,7 @@ def download_sentinel2_with_gees2(year, polygon, start_month, end_month, cloud_c
         
         # Create a temporary directory for downloading
         temp_dir = tempfile.mkdtemp()
-        output_file = os.path.join(temp_dir, f"sentinel2_{year}_{start_month:02d}_{end_month:02d}_median.tif")
+        output_file = os.path.join(temp_dir, f"sentinel2_{date}_median.tif")
         
         # Convert polygon to GeoJSON format
         geojson = {"type": "Polygon", "coordinates": [list(polygon.exterior.coords)]}
@@ -442,7 +400,7 @@ def download_sentinel2_with_gees2(year, polygon, start_month, end_month, cloud_c
         ee_geometry = ee.Geometry.Polygon(geojson['coordinates'])
         
         # Create Earth Engine image collection
-        status_placeholder.info(f"Creating Earth Engine image collection for {start_date} to {end_date} with cloud cover < {cloud_cover_limit}%...")
+        status_placeholder.info(f"Creating Earth Engine image collection around {date} (±15 days) with cloud cover < {cloud_cover_limit}%...")
         
         # Filter Sentinel-2 collection
         collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
@@ -455,32 +413,12 @@ def download_sentinel2_with_gees2(year, polygon, start_month, end_month, cloud_c
         status_placeholder.info(f"Found {count} Sentinel-2 images with cloud cover < {cloud_cover_limit}%")
         
         if count == 0:
-            status_placeholder.warning(f"No Sentinel-2 images found for {year} ({start_month:02d}-{end_month:02d}) with cloud cover < {cloud_cover_limit}%")
-            
-            # Try with higher cloud cover
-            higher_limit = min(cloud_cover_limit * 2, 100)
-            status_placeholder.info(f"Trying with higher cloud cover limit ({higher_limit}%)...")
-            
-            # Create a new collection with higher cloud cover limit
-            collection = (ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-                         .filterBounds(ee_geometry)
-                         .filterDate(start_date, end_date)
-                         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', higher_limit)))
-            
-            count = collection.size().getInfo()
-            status_placeholder.info(f"Found {count} Sentinel-2 images with cloud cover < {higher_limit}%")
-            
-            if count == 0:
-                status_placeholder.error(f"No Sentinel-2 images found for {year} ({start_month:02d}-{end_month:02d}) even with higher cloud cover limit.")
-                return None
+            status_placeholder.warning(f"No Sentinel-2 images found around {date} with cloud cover < {cloud_cover_limit}%")
+            return None
         
-        # Create median composite
+        # Create median composite - NO SCALING APPLIED, using raw Level-2A values
         status_placeholder.info(f"Creating median composite from {count} images...")
         median_image = collection.median().select(S2_BANDS)
-        
-        # Set up progress callback
-        def progress_callback(progress):
-            progress_placeholder.progress(progress)
         
         # Create a directory for individual band downloads
         bands_dir = os.path.join(temp_dir, "bands")
@@ -517,7 +455,7 @@ def download_sentinel2_with_gees2(year, polygon, start_month, end_month, cloud_c
                                 f.write(chunk)
                     
                     band_files.append(band_file)
-                    progress_callback((i + 1) / len(S2_BANDS))
+                    progress_placeholder.progress((i + 1) / len(S2_BANDS))
                 else:
                     status_placeholder.error(f"Failed to download band {band}: HTTP status {response.status_code}")
             except Exception as e:
@@ -548,21 +486,11 @@ def download_sentinel2_with_gees2(year, polygon, start_month, end_month, cloud_c
         
     except Exception as e:
         status_placeholder.error(f"Error downloading Sentinel-2 data: {str(e)}")
-        import traceback
-        st.error(traceback.format_exc())
         return None
 
 # Helper function to normalize image data
 def normalized(img):
-    """
-    Normalize image data to range [0, 1]
-    
-    Parameters:
-    img (numpy.ndarray): Input image
-    
-    Returns:
-    numpy.ndarray: Normalized image
-    """
+    """Normalize image data to range [0, 1]"""
     min_val = np.nanmin(img)
     max_val = np.nanmax(img)
     
@@ -574,29 +502,12 @@ def normalized(img):
 
 # Function to determine UTM zone from longitude
 def get_utm_zone(longitude):
-    """
-    Determine the UTM zone for a given longitude
-    
-    Parameters:
-    longitude (float): Longitude in decimal degrees
-    
-    Returns:
-    int: UTM zone number
-    """
+    """Determine the UTM zone for a given longitude"""
     return math.floor((longitude + 180) / 6) + 1
 
 # Function to determine UTM EPSG code from longitude and latitude
 def get_utm_epsg(longitude, latitude):
-    """
-    Determine the EPSG code for UTM zone based on longitude and latitude
-    
-    Parameters:
-    longitude (float): Longitude in decimal degrees
-    latitude (float): Latitude in decimal degrees
-    
-    Returns:
-    str: EPSG code for the appropriate UTM zone
-    """
+    """Determine the EPSG code for UTM zone based on longitude and latitude"""
     zone_number = get_utm_zone(longitude)
     
     # Northern hemisphere if latitude >= 0, Southern hemisphere if latitude < 0
@@ -609,17 +520,7 @@ def get_utm_epsg(longitude, latitude):
 
 # Function to convert coordinate system from WGS-84 to appropriate UTM Zone
 def convert_to_utm(src_path, dst_path, polygon=None):
-    """
-    Reproject a GeoTIFF from WGS-84 to the appropriate UTM zone
-    
-    Parameters:
-    src_path (str): Path to source GeoTIFF in WGS-84
-    dst_path (str): Path to save reprojected GeoTIFF
-    polygon (shapely.geometry.Polygon, optional): Polygon to determine UTM zone
-    
-    Returns:
-    str: Path to the reprojected file and the EPSG code used
-    """
+    """Reproject a GeoTIFF from WGS-84 to the appropriate UTM zone"""
     with rasterio.open(src_path) as src:
         # If polygon is provided, use its centroid to determine UTM zone
         if polygon:
@@ -664,82 +565,50 @@ def convert_to_utm(src_path, dst_path, polygon=None):
         
         return dst_path, dst_crs
 
-# Function to apply morphological erosion
-def apply_erosion(image, kernel_size):
-    """
-    Apply morphological erosion to a binary image
-    
-    Parameters:
-    image (numpy.ndarray): Binary image to erode
-    kernel_size (int): Size of the structuring element
-    
-    Returns:
-    numpy.ndarray: Eroded binary image
-    """
-    # Create a structuring element (kernel)
-    kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
-    
-    # Apply erosion
-    eroded_image = ndimage.binary_erosion(image, structure=kernel).astype(image.dtype)
-    
-    return eroded_image
-
 @st.cache_resource
-def load_model(model_path):
+def load_water_model(model_path):
+    """Load the water segmentation model"""
     try:
-        device = torch.device('cpu')
-        model = smp.UnetPlusPlus(
-            encoder_name='timm-efficientnet-b7',
-            encoder_weights='imagenet',
-            in_channels=12,  # 12 bands for Sentinel-2
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        st.info(f"Using device: {device}")
+        
+        # Initialize your water segmentation model architecture here
+        # Modify this based on your specific model architecture
+        model = smp.Unet(
+            encoder_name='resnet34',
+            encoder_weights=None,
+            in_channels=6,  # 6 bands for water detection (B2, B3, B4, B8, B11, B12)
             classes=1,
-            decoder_attention_type='scse'
+            activation=None
         ).to(device)
-
-        # Try loading the state_dict directly
-        loaded_object = torch.load(model_path, map_location=device, weights_only=False)
-
-        if isinstance(loaded_object, dict) and 'model_state_dict' in loaded_object:
-            # It's a checkpoint dictionary
-            model.load_state_dict(loaded_object['model_state_dict'])
-            st.info("Model loaded from checkpoint dictionary.")
-        elif isinstance(loaded_object, dict):
-            # It's a raw state_dict
-            model.load_state_dict(loaded_object)
-            st.info("Model loaded directly from state_dict.")
+        
+        # Load the model weights
+        checkpoint = torch.load(model_path, map_location=device)
+        
+        if isinstance(checkpoint, dict):
+            if 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+                st.info("Model loaded from checkpoint dictionary.")
+            else:
+                model.load_state_dict(checkpoint)
+                st.info("Model loaded from state dictionary.")
         else:
-            # This case might occur if torch.save(model, PATH) was used
-            # and loaded_object is the model itself.
-            # However, smp.UnetPlusPlus is already instantiated above.
-            # This path is less likely for .pt files meant for state_dict loading.
-            st.error("Loaded model file is not a recognized state_dict or checkpoint format.")
-            st.session_state.model_loaded = False
-            return None, None
-
+            # If it's the model itself
+            model = checkpoint
+            st.info("Model loaded directly.")
+        
         model.eval()
-        st.session_state.model_loaded = True # Indicate model is loaded
-        st.success("Model loaded successfully!") # Add success message
+        st.session_state.model_loaded = True
+        st.success("✅ Water segmentation model loaded successfully!")
         return model, device
     except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
-        st.session_state.model_loaded = False # Indicate model loading failed
+        st.error(f"❌ Error loading water model: {str(e)}")
+        st.session_state.model_loaded = False
         return None, None
 
-# [Rest of your code continues unchanged from here...]
-# Function to process image with better error handling for non-overlapping geometries
-def process_image(image_path, year, selected_polygon, region_number):
-    """
-    Complete image processing pipeline: clip, patch, classify, and reconstruct
-    
-    Parameters:
-    image_path (str): Path to the Sentinel-2 image
-    year (str): Year of the image (e.g., "2021")
-    selected_polygon (shapely.geometry.Polygon): Selected region polygon
-    region_number (int): Region number
-    
-    Returns:
-    bool: True if processing was successful, False otherwise
-    """
+# Function to process image for water detection
+def process_water_detection(image_path, selected_polygon, region_number):
+    """Process image for water body detection"""
     progress_placeholder = st.empty()
     status_placeholder = st.empty()
     
@@ -756,21 +625,6 @@ def process_image(image_path, year, selected_polygon, region_number):
             
             if not raster_bounds.intersects(polygon_shapely):
                 status_placeholder.error("Error: The selected region doesn't overlap with the downloaded Sentinel-2 image.")
-                st.error(f"Selected region bounds: {polygon_shapely.bounds}")
-                st.error(f"Raster bounds: {src.bounds}")
-                
-                # Display the issue visually
-                fig, ax = plt.subplots(figsize=(10, 10))
-                # Plot raster bounds
-                x, y = raster_bounds.exterior.xy
-                ax.plot(x, y, color='red', linewidth=2, label='Raster Bounds')
-                # Plot selected polygon
-                x, y = polygon_shapely.exterior.xy
-                ax.plot(x, y, color='blue', linewidth=2, label='Selected Region')
-                ax.set_title("Geometry Issue: No Overlap")
-                ax.legend()
-                st.pyplot(fig)
-                
                 return False
             
             # Convert polygon to GeoJSON format for rasterio
@@ -782,30 +636,12 @@ def process_image(image_path, year, selected_polygon, region_number):
                 
                 # Check if the clipped image has valid data
                 if clipped_img.size == 0 or np.all(clipped_img == 0):
-                    status_placeholder.error("Error: Clipping resulted in an empty image. The region may not overlap with valid data.")
+                    status_placeholder.error("Error: Clipping resulted in an empty image.")
                     return False
                 
             except ValueError as e:
-                if "Input shapes do not overlap raster" in str(e):
-                    status_placeholder.error("Error: The selected region doesn't overlap with valid data in the image.")
-                    st.error("This can happen if the region is outside the image bounds or in an area with no data.")
-                    
-                    # Try to visualize the issue
-                    fig, ax = plt.subplots(figsize=(10, 10))
-                    # Show a simple RGB preview of the raster if possible
-                    try:
-                        preview = src.read([4, 3, 2]) # Try to read RGB bands
-                        preview = np.dstack([preview[i, :, :] for i in range(3)])
-                        preview = (preview - preview.min()) / (preview.max() - preview.min())
-                        ax.imshow(preview)
-                        ax.set_title("Raster Overview (RGB)")
-                    except:
-                        ax.set_title("Could not display raster overview")
-                    
-                    st.pyplot(fig)
-                    return False
-                else:
-                    raise
+                status_placeholder.error(f"Error during clipping: {str(e)}")
+                return False
             
             # Store the clipped image metadata
             clipped_meta = src.meta.copy()
@@ -815,16 +651,16 @@ def process_image(image_path, year, selected_polygon, region_number):
                 "transform": clipped_transform
             })
             
-            # Save the clipped image to a temporary file with original CRS
+            # Save the clipped image to a temporary file
             temp_dir = os.path.dirname(image_path)
             os.makedirs(os.path.join(temp_dir, "temp"), exist_ok=True)
-            temp_clipped_path = os.path.join(temp_dir, "temp", f"temp_clipped_{year}_region{region_number}.tif")
+            temp_clipped_path = os.path.join(temp_dir, "temp", f"temp_clipped_region{region_number}.tif")
             
             with rasterio.open(temp_clipped_path, 'w', **clipped_meta) as dst:
                 dst.write(clipped_img)
             
-            # Convert to appropriate UTM Zone based on the polygon's location
-            utm_clipped_path = os.path.join(temp_dir, "temp", f"utm_clipped_{year}_region{region_number}.tif")
+            # Convert to appropriate UTM Zone
+            utm_clipped_path = os.path.join(temp_dir, "temp", f"utm_clipped_region{region_number}.tif")
             utm_path, utm_crs = convert_to_utm(temp_clipped_path, utm_clipped_path, selected_polygon)
             
             # Read back the UTM version
@@ -832,406 +668,405 @@ def process_image(image_path, year, selected_polygon, region_number):
                 clipped_img = src_utm.read()
                 clipped_meta = src_utm.meta.copy()
             
-            # Store clipped image in session state based on year
-            if year == st.session_state.before_year:
-                st.session_state.clipped_img = clipped_img
-                st.session_state.clipped_meta = clipped_meta
-                st.session_state.region_number = region_number
-                st.session_state.year = year
-            else: # after year
-                st.session_state.clipped_img_2024 = clipped_img
-                st.session_state.clipped_meta_2024 = clipped_meta
-                st.session_state.region_number_2024 = region_number
-                st.session_state.year_2024 = year
+            # Extract only the bands needed for water detection (NO SCALING APPLIED)
+            water_bands_img = clipped_img[WATER_BAND_INDICES]
             
-            # Check if the clipped image is large enough for patching
-            if clipped_img.shape[1] < 300 or clipped_img.shape[2] < 300:
-                status_placeholder.error(f"The clipped image is too small ({clipped_img.shape[1]}x{clipped_img.shape[2]} pixels). Please select a larger area (minimum 300x300 pixels).")
+            # Store in session state
+            st.session_state.clipped_img = water_bands_img
+            st.session_state.clipped_meta = clipped_meta
+            st.session_state.region_number = region_number
+            
+            # Check if the clipped image is large enough
+            if water_bands_img.shape[1] < 224 or water_bands_img.shape[2] < 224:
+                status_placeholder.error(f"The clipped image is too small ({water_bands_img.shape[1]}x{water_bands_img.shape[2]} pixels). Please select a larger area (minimum 224x224 pixels).")
                 return False
             
-            # Display the clipped image
-            rgb_bands = [3, 2, 1] # 0-indexed for bands 4, 3, 2
+            # Display the clipped image (RGB visualization)
+            rgb_bands = [2, 1, 0]  # B4, B3, B2 for RGB
             
-            if clipped_img.shape[0] >= 3:
+            rgb = np.zeros((water_bands_img.shape[1], water_bands_img.shape[2], 3), dtype=np.float32)
+            
+            # Normalize and assign bands for visualization only
+            for i, band in enumerate(rgb_bands):
+                if band < water_bands_img.shape[0]:
+                    band_data = water_bands_img[band]
+                    # Simple contrast stretch for visualization
+                    min_val = np.percentile(band_data, 2)
+                    max_val = np.percentile(band_data, 98)
+                    rgb[:, :, i] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
+            
+            # Display the RGB image
+            fig, ax = plt.subplots(figsize=(10, 10))
+            ax.imshow(rgb)
+            ax.set_title(f"Clipped Sentinel-2 Image (Region {region_number})")
+            ax.axis('off')
+            st.pyplot(fig)
+            
+            progress_placeholder.progress(25)
+            status_placeholder.success("Step 1/4: Clipping completed successfully")
+            
+            # 2. PATCHING STEP
+            status_placeholder.info("Step 2/4: Creating patches...")
+            
+            # Prepare the image for patching (keep raw values, no normalization)
+            img_for_patching = np.moveaxis(water_bands_img, 0, -1)  # Change to H x W x C format
+            
+            # Create patches
+            patch_size = 224
+            patches = patchify(img_for_patching, (patch_size, patch_size, water_bands_img.shape[0]), step=patch_size)
+            patches = patches.squeeze()
+            
+            # Create output directory
+            base_dir = os.path.dirname(image_path)
+            output_folder = os.path.join(base_dir, f"water_patches_region{region_number}")
+            os.makedirs(output_folder, exist_ok=True)
+            
+            # Save patches
+            num_patches = patches.shape[0] * patches.shape[1]
+            saved_paths = []
+            
+            # Create a sub-progress bar for patches
+            patch_progress = st.progress(0)
+            
+            for i in range(patches.shape[0]):
+                for j in range(patches.shape[1]):
+                    patch = patches[i, j]
+                    
+                    # NO NORMALIZATION - keep raw values for model input
+                    # Convert to rasterio format (C x H x W)
+                    patch_for_saving = np.moveaxis(patch, -1, 0)
+                    
+                    # Create filename
+                    patch_name = f"water_region{region_number}_{i}_{j}.tif"
+                    output_file_path = os.path.join(output_folder, patch_name)
+                    saved_paths.append(output_file_path)
+                    
+                    # Save the patch with raw values
+                    with rasterio.open(
+                        output_file_path,
+                        'w',
+                        driver='GTiff',
+                        height=patch_size,
+                        width=patch_size,
+                        count=patch_for_saving.shape[0],
+                        dtype=patch_for_saving.dtype,  # Keep original dtype
+                        crs=clipped_meta.get('crs'),
+                        transform=clipped_meta.get('transform')
+                    ) as dst:
+                        for band_idx in range(patch_for_saving.shape[0]):
+                            band_data = patch_for_saving[band_idx].reshape(patch_size, patch_size)
+                            dst.write(band_data, band_idx+1)
+                    
+                    # Update patch progress
+                    patch_count = i * patches.shape[1] + j + 1
+                    patch_progress.progress(patch_count / num_patches)
+            
+            # Store the saved paths in session state
+            st.session_state.saved_patches_paths = saved_paths
+            st.session_state.patches_shape = patches.shape
+            st.session_state.patches_info = {
+                'region_number': region_number,
+                'output_folder': output_folder,
+                'patch_size': patch_size
+            }
+            
+            # Display sample patches
+            num_samples = min(6, num_patches)
+            if num_samples > 0:
+                st.subheader("Sample Patches")
+                fig, axes = plt.subplots(1, num_samples, figsize=(15, 4))
+                if num_samples == 1:
+                    axes = [axes]
+                
+                for idx, ax in enumerate(axes):
+                    if idx < num_patches:
+                        i, j = idx // patches.shape[1], idx % patches.shape[1]
+                        patch = patches[i, j]
+                        
+                        # For visualization, use RGB bands
+                        rgb_bands = [2, 1, 0]  # B4, B3, B2
+                        patch_rgb = np.zeros((patch_size, patch_size, 3), dtype=np.float32)
+                        for b, band in enumerate(rgb_bands):
+                            if band < patch.shape[-1]:
+                                band_data = patch[:, :, band]
+                                min_val = np.percentile(band_data, 2)
+                                max_val = np.percentile(band_data, 98)
+                                patch_rgb[:, :, b] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
+                        
+                        ax.imshow(patch_rgb)
+                        ax.set_title(f"Patch {i}_{j}")
+                        ax.axis('off')
+                
+                st.pyplot(fig)
+            
+            progress_placeholder.progress(50)
+            status_placeholder.success(f"Step 2/4: Created {num_patches} patches successfully")
+            
+            # 3. WATER DETECTION STEP
+            status_placeholder.info("Step 3/4: Detecting water bodies...")
+            
+            # Load model if not already loaded
+            if not st.session_state.model_loaded:
+                with st.spinner("Loading water segmentation model..."):
+                    model, device = load_water_model(model_path)
+                    if model is not None:
+                        st.session_state.model = model
+                        st.session_state.device = device
+                        st.session_state.model_loaded = True
+                    else:
+                        status_placeholder.error("Failed to load water segmentation model.")
+                        return False
+            
+            # Get saved paths
+            patches_info = st.session_state.patches_info
+            saved_paths = st.session_state.saved_patches_paths
+            patches_shape = st.session_state.patches_shape
+            
+            # Create output directory for water masks
+            base_dir = os.path.dirname(image_path)
+            water_folder = os.path.join(base_dir, f"water_masks_region{region_number}")
+            os.makedirs(water_folder, exist_ok=True)
+            
+            # Track water detection results
+            water_results = []
+            water_paths = []
+            
+            # Create a sub-progress bar for detection
+            detect_progress = st.progress(0)
+            
+            # Process each patch
+            total_patches = len(saved_paths)
+            for idx, patch_path in enumerate(saved_paths):
+                try:
+                    # Extract i, j from filename
+                    filename = os.path.basename(patch_path)
+                    parts = filename.split('_')
+                    i = int(parts[-2])
+                    j = int(parts[-1].split('.')[0])
+                    
+                    # Read the patch (raw values, no scaling)
+                    with rasterio.open(patch_path) as src:
+                        patch = src.read()  # This will be in (C, H, W) format
+                        patch_meta = src.meta.copy()
+                    
+                    # Create RGB version for display
+                    rgb_bands = [2, 1, 0]  # B4, B3, B2
+                    rgb_patch = np.zeros((patch.shape[1], patch.shape[2], 3), dtype=np.float32)
+                    
+                    for b, band in enumerate(rgb_bands):
+                        if band < patch.shape[0]:
+                            band_data = patch[band]
+                            min_val = np.percentile(band_data, 2)
+                            max_val = np.percentile(band_data, 98)
+                            rgb_patch[:, :, b] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
+                    
+                    # Convert to torch tensor (keep raw values for model)
+                    img_tensor = torch.tensor(patch.astype(np.float32), dtype=torch.float32)
+                    img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
+                    
+                    # Perform water detection
+                    with torch.inference_mode():
+                        prediction = st.session_state.model(img_tensor.to(st.session_state.device))
+                        prediction = torch.sigmoid(prediction).cpu()
+                    
+                    # Convert prediction to numpy
+                    pred_np = prediction.squeeze().numpy()
+                    
+                    # Create binary mask (threshold at 0.5)
+                    water_mask = (pred_np > 0.5).astype(np.uint8) * 255
+                    
+                    # Save water mask
+                    output_filename = f"water_mask_region{region_number}_{i}_{j}.tif"
+                    output_path = os.path.join(water_folder, output_filename)
+                    water_paths.append(output_path)
+                    
+                    # Save as GeoTIFF
+                    patch_meta.update({
+                        'count': 1,
+                        'dtype': 'uint8'
+                    })
+                    
+                    with rasterio.open(output_path, 'w', **patch_meta) as dst:
+                        dst.write(water_mask.reshape(1, water_mask.shape[0], water_mask.shape[1]))
+                    
+                    # Add to display list (limit to 6)
+                    if len(water_results) < 6:
+                        water_results.append({
+                            'path': output_path,
+                            'i': i,
+                            'j': j,
+                            'mask': water_mask,
+                            'rgb_original': rgb_patch
+                        })
+                    
+                    # Update detection progress
+                    detect_progress.progress((idx + 1) / total_patches)
+                    
+                except Exception as e:
+                    st.error(f"Error processing patch {patch_path}: {str(e)}")
+            
+            # Store water detection paths in session state
+            st.session_state.water_paths = water_paths
+            st.session_state.water_shape = patches_shape
+            
+            # Display sample water detection results
+            if water_results:
+                st.subheader("Sample Water Detection Results")
+                
+                # Create a figure with subplots - 2 rows: originals and masks
+                num_samples = len(water_results)
+                fig, axes = plt.subplots(2, num_samples, figsize=(15, 8))
+                
+                # First row: Original Sentinel-2 RGB images
+                for idx, result in enumerate(water_results):
+                    axes[0, idx].imshow(result['rgb_original'])
+                    axes[0, idx].set_title(f"Original {result['i']}_{result['j']}")
+                    axes[0, idx].axis('off')
+                
+                # Second row: Water masks
+                for idx, result in enumerate(water_results):
+                    axes[1, idx].imshow(result['mask'], cmap='Blues')
+                    axes[1, idx].set_title(f"Water Mask {result['i']}_{result['j']}")
+                    axes[1, idx].axis('off')
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+            
+            progress_placeholder.progress(75)
+            status_placeholder.success(f"Step 3/4: Detected water in {total_patches} patches successfully")
+            
+            # 4. RECONSTRUCTION STEP
+            status_placeholder.info("Step 4/4: Reconstructing full water mask...")
+            
+            # Get water detection paths
+            patches_info = st.session_state.patches_info
+            water_paths = st.session_state.water_paths
+            patches_shape = st.session_state.water_shape
+            clipped_meta = st.session_state.clipped_meta
+            
+            # Load all water masks
+            patches = []
+            patch_indices = []
+            
+            for path in water_paths:
+                # Extract i, j from filename
+                filename = os.path.basename(path)
+                parts = filename.split('_')
+                i = int(parts[-2])
+                j = int(parts[-1].split('.')[0])
+                
+                # Read the patch
+                with rasterio.open(path) as src:
+                    patch = src.read(1)  # Read first band
+                    patches.append(patch)
+                    patch_indices.append((i, j))
+            
+            # Determine grid dimensions
+            i_vals = [idx[0] for idx in patch_indices]
+            j_vals = [idx[1] for idx in patch_indices]
+            max_i = max(i_vals) + 1
+            max_j = max(j_vals) + 1
+            
+            # Create empty grid to hold patches
+            patch_size = patches_info['patch_size']
+            grid = np.zeros((max_i, max_j, patch_size, patch_size), dtype=np.uint8)
+            
+            # Fill the grid with patches
+            for (i, j), patch in zip(patch_indices, patches):
+                grid[i, j] = patch
+            
+            # Reconstruct the full image using unpatchify
+            reconstructed_water_mask = unpatchify(grid, (max_i * patch_size, max_j * patch_size))
+            
+            # Create output filename
+            base_dir = os.path.dirname(image_path)
+            output_filename = f"water_mask_full_region{region_number}.tif"
+            output_path = os.path.join(base_dir, output_filename)
+            
+            # Save as GeoTIFF
+            out_meta = clipped_meta.copy()
+            out_meta.update({
+                'count': 1,
+                'height': reconstructed_water_mask.shape[0],
+                'width': reconstructed_water_mask.shape[1],
+                'dtype': 'uint8'
+            })
+            
+            with rasterio.open(output_path, 'w', **out_meta) as dst:
+                dst.write(reconstructed_water_mask, 1)
+            
+            # Store the result in session state
+            st.session_state.water_detection_result = reconstructed_water_mask
+            st.session_state.water_detection_path = output_path
+            
+            # Display the reconstructed water mask
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Display original RGB image
+                fig, ax = plt.subplots(figsize=(10, 10))
+                
+                # Create RGB visualization from clipped image
+                clipped_img = st.session_state.clipped_img
+                rgb_bands = [2, 1, 0]  # B4, B3, B2
                 rgb = np.zeros((clipped_img.shape[1], clipped_img.shape[2], 3), dtype=np.float32)
                 
-                # Normalize and assign bands
                 for i, band in enumerate(rgb_bands):
                     if band < clipped_img.shape[0]:
                         band_data = clipped_img[band]
-                        # Simple contrast stretch for visualization
                         min_val = np.percentile(band_data, 2)
                         max_val = np.percentile(band_data, 98)
                         rgb[:, :, i] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
                 
-                # Display the RGB image
-                fig, ax = plt.subplots(figsize=(10, 10))
                 ax.imshow(rgb)
-                ax.set_title(f"Clipped Sentinel-2 {year} Image ({clipped_meta['crs']})")
+                ax.set_title("Original Sentinel-2 Image (RGB)")
                 ax.axis('off')
                 st.pyplot(fig)
             
-            progress_placeholder.progress(25)
-            status_placeholder.success("Step 1/4: Clipping completed successfully")
-        
-        # 2. PATCHING STEP
-        status_placeholder.info("Step 2/4: Creating patches...")
-        
-        # Prepare the image for patching
-        img_for_patching = np.moveaxis(clipped_img, 0, -1) # Change to H x W x C format for patchify
-        
-        # Create patches
-        patch_size = 224
-        patches = patchify(img_for_patching, (patch_size, patch_size, clipped_img.shape[0]), step=patch_size)
-        patches = patches.squeeze()
-        
-        # Create output directory
-        base_dir = os.path.dirname(image_path)
-        output_folder = os.path.join(base_dir, f"patches_{year}_region{region_number}")
-        os.makedirs(output_folder, exist_ok=True)
-        
-        # Save patches
-        num_patches = patches.shape[0] * patches.shape[1]
-        saved_paths = []
-        
-        # Create a sub-progress bar for patches
-        patch_progress = st.progress(0)
-        
-        for i in range(patches.shape[0]):
-            for j in range(patches.shape[1]):
-                patch = patches[i, j] # Get the individual patch
-                
-                # Normalize the patch
-                patch_normalized = normalized(patch)
-                
-                # Convert to rasterio format (C x H x W)
-                patch_for_saving = np.moveaxis(patch_normalized, -1, 0)
-                
-                # Create filename
-                patch_name = f"region{region_number}_{i}_{j}.tif"
-                output_file_path = os.path.join(output_folder, patch_name)
-                saved_paths.append(output_file_path)
-                
-                # Save the patch as GeoTIFF with the detected UTM CRS
-                # Fix: Properly reshape the data when writing each band
-                with rasterio.open(
-                    output_file_path,
-                    'w',
-                    driver='GTiff',
-                    height=patch_size,
-                    width=patch_size,
-                    count=patch_for_saving.shape[0],
-                    dtype='float64',
-                    crs=clipped_meta.get('crs'),
-                    transform=clipped_meta.get('transform')
-                ) as dst:
-                    # Write each band separately with proper reshaping
-                    for band_idx in range(patch_for_saving.shape[0]):
-                        band_data = patch_for_saving[band_idx].reshape(patch_size, patch_size)
-                        dst.write(band_data, band_idx+1)
-                
-                # Update patch progress
-                patch_count = i * patches.shape[1] + j + 1
-                patch_progress.progress(patch_count / num_patches)
-        
-        # Store the saved paths in session state for classification
-        if year == st.session_state.before_year:
-            st.session_state.saved_patches_paths = saved_paths
-            st.session_state.patches_shape = patches.shape
-            st.session_state.patches_info = {
-                'year': year,
-                'region_number': region_number,
-                'output_folder': output_folder,
-                'patch_size': patch_size
-            }
-        else: # after year
-            st.session_state.saved_patches_paths_2024 = saved_paths
-            st.session_state.patches_shape_2024 = patches.shape
-            st.session_state.patches_info_2024 = {
-                'year': year,
-                'region_number': region_number,
-                'output_folder': output_folder,
-                'patch_size': patch_size
-            }
-        
-        # Display sample patches
-        num_samples = min(6, num_patches)
-        if num_samples > 0:
-            st.subheader("Sample Patches")
-            fig, axes = plt.subplots(1, num_samples, figsize=(15, 4))
-            if num_samples == 1:
-                axes = [axes] # Make it iterable if only one subplot
+            with col2:
+                # Display water mask
+                fig, ax = plt.subplots(figsize=(10, 10))
+                ax.imshow(reconstructed_water_mask, cmap='Blues')
+                ax.set_title("Detected Water Bodies")
+                ax.axis('off')
+                st.pyplot(fig)
             
-            for idx, ax in enumerate(axes):
-                if idx < num_patches:
-                    i, j = idx // patches.shape[1], idx % patches.shape[1]
-                    patch = patches[i, j]
-                    
-                    # For visualization, use the same RGB bands as the main image
-                    rgb_bands = [3, 2, 1] # Adjust based on your data
-                    patch_rgb = np.zeros((patch_size, patch_size, 3), dtype=np.float32)
-                    for b, band in enumerate(rgb_bands):
-                        if band < patch.shape[-1]:
-                            band_data = patch[:, :, band]
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            patch_rgb[:, :, b] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
-                    
-                    ax.imshow(patch_rgb)
-                    ax.set_title(f"Patch {i}_{j}")
-                    ax.axis('off')
+            # Calculate water statistics
+            total_pixels = reconstructed_water_mask.size
+            water_pixels = np.sum(reconstructed_water_mask > 0)
+            water_percentage = (water_pixels / total_pixels) * 100
             
-            st.pyplot(fig)
-        
-        progress_placeholder.progress(50)
-        status_placeholder.success(f"Step 2/4: Created {num_patches} patches successfully")
-        
-        # 3. CLASSIFICATION STEP
-        status_placeholder.info("Step 3/4: Classifying patches...")
-        
-        # Load model if not already loaded
-        if not st.session_state.model_loaded:
-            with st.spinner("Loading model..."):
-                model, device = load_model(model_path)
-                if model is not None:
-                    st.session_state.model = model
-                    st.session_state.device = device
-                    st.session_state.model_loaded = True
-                else:
-                    status_placeholder.error("Failed to load model. Please check the model path.")
-                    return False
-        
-        # Get saved paths based on year
-        if year == st.session_state.before_year:
-            patches_info = st.session_state.patches_info
-            saved_paths = st.session_state.saved_patches_paths
-            patches_shape = st.session_state.patches_shape
-        else: # after year
-            patches_info = st.session_state.patches_info_2024
-            saved_paths = st.session_state.saved_patches_paths_2024
-            patches_shape = st.session_state.patches_shape_2024
-        
-        # Create output directory for classified images
-        base_dir = os.path.dirname(image_path)
-        classified_folder = os.path.join(base_dir, f"classified_{year}_region{region_number}")
-        os.makedirs(classified_folder, exist_ok=True)
-        
-        # Track classified images and original images for display
-        classified_results = []
-        classified_paths = []
-        
-        # Create a sub-progress bar for classification
-        classify_progress = st.progress(0)
-        
-        # Process each patch
-        total_patches = len(saved_paths)
-        for idx, patch_path in enumerate(saved_paths):
-            try:
-                # Extract i, j from filename
-                filename = os.path.basename(patch_path)
-                i_j_part = filename.split('_')[-2:]
-                i = int(i_j_part[0])
-                j = int(i_j_part[1].split('.')[0])
-                
-                # Read the patch
-                with rasterio.open(patch_path) as src:
-                    patch = src.read() # This will be in (C, H, W) format
-                    patch_meta = src.meta.copy()
-                
-                # Create RGB version of original patch for display
-                rgb_bands = [3, 2, 1] # Adjust based on your data
-                if patch.shape[0] >= 3:
-                    rgb_patch = np.zeros((patch.shape[1], patch.shape[2], 3), dtype=np.float32)
-                    
-                    # Normalize and assign bands
-                    for b, band in enumerate(rgb_bands):
-                        if band < patch.shape[0]:
-                            band_data = patch[band]
-                            # Simple contrast stretch for visualization
-                            min_val = np.percentile(band_data, 2)
-                            max_val = np.percentile(band_data, 98)
-                            rgb_patch[:, :, b] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
-                
-                # Convert to torch tensor
-                img_tensor = torch.tensor(patch, dtype=torch.float32)
-                img_tensor = img_tensor.unsqueeze(0) # Add batch dimension
-                
-                # Perform classification
-                with torch.inference_mode():
-                    prediction = st.session_state.model(img_tensor)
-                    prediction = torch.sigmoid(prediction).cpu()
-                
-                # Convert prediction to numpy
-                pred_np = prediction.squeeze().numpy()
-                
-                # Create binary mask (threshold at 0.5)
-                binary_mask = (pred_np > 0.5).astype(np.uint8) * 255
-                
-                # Save classified result
-                output_filename = f"classified_region{patches_info['region_number']}_{i}_{j}.tif"
-                output_path = os.path.join(classified_folder, output_filename)
-                classified_paths.append(output_path)
-                
-                # Save as GeoTIFF with the same CRS as the patch
-                patch_meta.update({
-                    'count': 1,
-                    'dtype': 'uint8'
-                })
-                
-                with rasterio.open(
-                    output_path,
-                    'w',
-                    **patch_meta
-                ) as dst:
-                    dst.write(binary_mask.reshape(1, binary_mask.shape[0], binary_mask.shape[1]))
-                
-                # Add to display list (limit to 6)
-                if len(classified_results) < 6:
-                    classified_results.append({
-                        'path': output_path,
-                        'i': i,
-                        'j': j,
-                        'mask': binary_mask,
-                        'rgb_original': rgb_patch
-                    })
-                
-                # Update classification progress
-                classify_progress.progress((idx + 1) / total_patches)
-                
-            except Exception as e:
-                st.error(f"Error processing patch {patch_path}: {str(e)}")
-        
-        # Store classified paths in session state
-        if year == st.session_state.before_year:
-            st.session_state.classified_paths = classified_paths
-            st.session_state.classified_shape = patches_shape
-        else: # after year
-            st.session_state.classified_paths_2024 = classified_paths
-            st.session_state.classified_shape_2024 = patches_shape
-        
-        # Display sample classified images with originals
-        if classified_results:
-            st.subheader("Sample Classification Results")
+            # Estimate water area (assuming 10m resolution)
+            water_area_m2 = water_pixels * 100  # 10m x 10m = 100 m²
+            water_area_km2 = water_area_m2 / 1_000_000
             
-            # Create a figure with subplots - 2 rows: originals and masks
-            num_samples = len(classified_results)
-            fig, axes = plt.subplots(2, num_samples, figsize=(15, 8))
+            # Display statistics
+            st.subheader("Water Detection Statistics")
+            col1, col2, col3 = st.columns(3)
             
-            # First row: Original Sentinel-2 RGB images
-            for idx, result in enumerate(classified_results):
-                axes[0, idx].imshow(result['rgb_original'])
-                axes[0, idx].set_title(f"Original {result['i']}_{result['j']}")
-                axes[0, idx].axis('off')
+            with col1:
+                st.metric("Water Coverage", f"{water_percentage:.2f}%")
             
-            # Second row: Classification masks
-            for idx, result in enumerate(classified_results):
-                axes[1, idx].imshow(result['mask'], cmap='gray')
-                axes[1, idx].set_title(f"Classified {result['i']}_{result['j']}")
-                axes[1, idx].axis('off')
+            with col2:
+                st.metric("Water Area", f"{water_area_km2:.2f} km²")
             
-            plt.tight_layout()
-            st.pyplot(fig)
-        
-        progress_placeholder.progress(75)
-        status_placeholder.success(f"Step 3/4: Classified {total_patches} patches successfully")
-        
-        # 4. RECONSTRUCTION STEP
-        status_placeholder.info("Step 4/4: Reconstructing full classification image...")
-        
-        # Get classified paths based on year
-        if year == st.session_state.before_year:
-            patches_info = st.session_state.patches_info
-            classified_paths = st.session_state.classified_paths
-            patches_shape = st.session_state.classified_shape
-            clipped_meta = st.session_state.clipped_meta
-        else: # after year
-            patches_info = st.session_state.patches_info_2024
-            classified_paths = st.session_state.classified_paths_2024
-            patches_shape = st.session_state.classified_shape_2024
-            clipped_meta = st.session_state.clipped_meta_2024
-        
-        # Load all classified patches
-        patches = []
-        patch_indices = []
-        
-        for path in classified_paths:
-            # Extract i, j from filename
-            filename = os.path.basename(path)
-            parts = filename.split('_')
-            i_j_part = parts[-2:]
-            i = int(i_j_part[0])
-            j = int(i_j_part[1].split('.')[0])
+            with col3:
+                st.metric("Total Pixels", f"{water_pixels:,}")
             
-            # Read the patch
-            with rasterio.open(path) as src:
-                patch = src.read(1) # Read first band
-                patches.append(patch)
-                patch_indices.append((i, j))
-        
-        # Determine grid dimensions
-        i_vals = [idx[0] for idx in patch_indices]
-        j_vals = [idx[1] for idx in patch_indices]
-        max_i = max(i_vals) + 1
-        max_j = max(j_vals) + 1
-        
-        # Create empty grid to hold patches
-        patch_size = patches_info['patch_size']
-        grid = np.zeros((max_i, max_j, patch_size, patch_size), dtype=np.uint8)
-        
-        # Fill the grid with patches
-        for (i, j), patch in zip(patch_indices, patches):
-            grid[i, j] = patch
-        
-        # Reconstruct the full image using unpatchify
-        reconstructed_image = unpatchify(grid, (max_i * patch_size, max_j * patch_size))
-        
-        # Create output filename
-        base_dir = os.path.dirname(image_path)
-        output_filename = f"reconstructed_classification_{year}_region{region_number}.tif"
-        output_path = os.path.join(base_dir, output_filename)
-        
-        # Save as GeoTIFF with the appropriate UTM CRS
-        # Use the metadata from the clipped image but update dimensions
-        out_meta = clipped_meta.copy()
-        out_meta.update({
-            'count': 1,
-            'height': reconstructed_image.shape[0],
-            'width': reconstructed_image.shape[1],
-            'dtype': 'uint8'
-        })
-        
-        with rasterio.open(output_path, 'w', **out_meta) as dst:
-            dst.write(reconstructed_image, 1)
-        
-        # Store the reconstructed image path in session state for change detection
-        if year == st.session_state.before_year:
-            st.session_state.reconstructed_before_path = output_path
-            st.session_state.reconstructed_before_image = reconstructed_image
-        else: # after year
-            st.session_state.reconstructed_after_path = output_path
-            st.session_state.reconstructed_after_image = reconstructed_image
-        
-        # Display the reconstructed image
-        fig, ax = plt.subplots(figsize=(10, 10))
-        ax.imshow(reconstructed_image, cmap='gray')
-        ax.set_title(f"Reconstructed Classification Image ({year})")
-        ax.axis('off')
-        st.pyplot(fig)
-        
-        # Provide download link
-        with open(output_path, "rb") as file:
-            st.download_button(
-                label=f"Download Reconstructed Classification ({year})",
-                data=file,
-                file_name=output_filename,
-                mime="image/tiff"
-            )
-        
-        progress_placeholder.progress(100)
-        status_placeholder.success(f"All processing steps completed successfully for {year}!")
-        
-        return True
-        
+            # Provide download link
+            with open(output_path, "rb") as file:
+                st.download_button(
+                    label="Download Water Mask (GeoTIFF)",
+                    data=file,
+                    file_name=output_filename,
+                    mime="image/tiff"
+                )
+            
+            progress_placeholder.progress(100)
+            status_placeholder.success("All processing steps completed successfully!")
+            
+            return True
+            
     except Exception as e:
         status_placeholder.error(f"Error in processing: {str(e)}")
         import traceback
@@ -1240,13 +1075,13 @@ def process_image(image_path, year, selected_polygon, region_number):
 
 # First tab - Region Selection
 with tab1:
-    st.header("Select Region of Interest and Time Periods")
+    st.header("Select Region of Interest and Date")
     
     # Add warning about region size
-    st.warning("Note: For optimal results, select regions smaller than 40 sq km. Larger areas will be processed using tiling, which may take longer.")
+    st.info("💡 For optimal results, select regions smaller than 40 sq km.")
     
     # Create a folium map centered at a default location
-    m = folium.Map(location=[35.6892, 51.3890], zoom_start=10) # Default to Tehran
+    m = folium.Map(location=[35.6892, 51.3890], zoom_start=10)  # Default to Tehran
     
     # Add drawing tools to the map
     draw = folium.plugins.Draw(
@@ -1274,7 +1109,7 @@ with tab1:
             
             if geometry['type'] == 'Polygon':
                 # Extract coordinates from the GeoJSON
-                coords = geometry['coordinates'][0] # First element contains the exterior ring
+                coords = geometry['coordinates'][0]  # First element contains the exterior ring
                 polygon = Polygon(coords)
                 
                 # Store in session state
@@ -1292,7 +1127,7 @@ with tab1:
                 
                 # Warn if area is large
                 if area_sq_km > 40:
-                    st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit.")
+                    st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing may take longer.")
     
     # Add a button to save the drawn polygons
     if st.button("Save Selected Region"):
@@ -1319,7 +1154,7 @@ with tab1:
                 lats = [float(x.strip()) for x in lat_input.split(",")]
                 lons = [float(x.strip()) for x in lon_input.split(",")]
                 if len(lats) == len(lons) and len(lats) >= 3:
-                    coords = list(zip(lons, lats)) # GeoJSON format is [lon, lat]
+                    coords = list(zip(lons, lats))  # GeoJSON format is [lon, lat]
                     test_polygon = Polygon(coords)
                     st.session_state.last_drawn_polygon = test_polygon
                     
@@ -1335,7 +1170,7 @@ with tab1:
                     
                     # Warn if area is large
                     if area_sq_km > 40:
-                        st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit.")
+                        st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing may take longer.")
                 else:
                     st.error("Please provide at least 3 coordinate pairs")
             except ValueError:
@@ -1364,29 +1199,29 @@ with tab1:
                 # Display area
                 area_sq_km = poly.area * 111 * 111  # Approximate conversion from degrees to km²
                 st.write(f"Area: ~{area_sq_km:.2f} km²")
-                
+            
             with col4:
                 # Add a delete button for each region
                 if st.button("Delete", key=f"delete_region_{i}"):
                     st.session_state.drawn_polygons.pop(i)
                     st.rerun()
     
-    # Time period selection section
-    st.subheader("Select Time Periods for Analysis", divider="blue")
+    # Date selection section
+    st.subheader("Select Date for Analysis", divider="blue")
     
-    # Create a beautiful card-like container for time selection
-    time_selection_container = st.container()
-    with time_selection_container:
+    # Create a beautiful card-like container for date selection
+    date_selection_container = st.container()
+    with date_selection_container:
         st.markdown("""
         <style>
-        .time-selection-card {
+        .date-selection-card {
             background-color: #f0f2f6;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 20px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
-        .time-selection-header {
+        .date-selection-header {
             font-size: 1.2em;
             font-weight: bold;
             margin-bottom: 15px;
@@ -1395,970 +1230,377 @@ with tab1:
         </style>
         """, unsafe_allow_html=True)
         
-        # Initialize session state variables for time selection if they don't exist
-        if 'before_year' not in st.session_state:
-            st.session_state.before_year = "2021"
-        if 'after_year' not in st.session_state:
-            st.session_state.after_year = "2024"
-        if 'start_month' not in st.session_state:
-            st.session_state.start_month = 5  # May
-        if 'end_month' not in st.session_state:
-            st.session_state.end_month = 6  # June
+        # Initialize session state variables for date selection if they don't exist
+        if 'selected_date' not in st.session_state:
+            st.session_state.selected_date = datetime.date(2023, 6, 15)
         
-        # Month selection (shared between before and after)
-        st.markdown('<div class="time-selection-card">', unsafe_allow_html=True)
-        st.markdown('<div class="time-selection-header">Select Months (for both images)</div>', unsafe_allow_html=True)
+        # Date selection
+        st.markdown('<div class="date-selection-card">', unsafe_allow_html=True)
+        st.markdown('<div class="date-selection-header">Select Date for Sentinel-2 Image</div>', unsafe_allow_html=True)
         
-        months = ["January", "February", "March", "April", "May", "June", 
-                 "July", "August", "September", "October", "November", "December"]
+        selected_date = st.date_input(
+            "Choose a date (±15 days will be used for image search)",
+            value=st.session_state.selected_date,
+            min_value=datetime.date(2015, 6, 23),  # Sentinel-2A launch date
+            max_value=datetime.date.today(),
+            key="date_selector"
+        )
+        st.session_state.selected_date = selected_date
         
-        # Create two columns for start and end month selection
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            start_month = st.selectbox(
-                "Start Month",
-                options=range(1, 13),
-                format_func=lambda x: months[x-1],
-                index=st.session_state.start_month - 1,
-                key="start_month_select"
-            )
-            st.session_state.start_month = start_month
-        
-        with col2:
-            # Ensure end month is not before start month
-            valid_end_months = range(start_month, 13)
-            end_month = st.selectbox(
-                "End Month",
-                options=valid_end_months,
-                format_func=lambda x: months[x-1],
-                index=min(st.session_state.end_month - start_month, len(valid_end_months) - 1),
-                key="end_month_select"
-            )
-            st.session_state.end_month = end_month
+        # Display the selected date range
+        start_date = selected_date - datetime.timedelta(days=15)
+        end_date = selected_date + datetime.timedelta(days=15)
+        st.info(f"Search period: {start_date} to {end_date}")
         
         st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Cloud cover limit selection
+    cloud_cover_limit = st.slider(
+        "Maximum Cloud Cover (%)",
+        min_value=0,
+        max_value=100,
+        value=20,
+        step=5,
+        help="Lower values give clearer images but may reduce available imagery"
+    )
+    
+    # Download and process section
+    st.subheader("Download and Process Sentinel-2 Data", divider="green")
+    
+    if st.session_state.drawn_polygons:
+        # Region selection for processing
+        region_options = [f"Region {i+1}" for i in range(len(st.session_state.drawn_polygons))]
+        selected_region_idx = st.selectbox(
+            "Select region to process:",
+            options=range(len(region_options)),
+            format_func=lambda x: region_options[x]
+        )
         
-        # Year selection for "Before" and "After" images
+        selected_polygon = st.session_state.drawn_polygons[selected_region_idx]
+        
+        # Display selected region info
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            centroid = selected_polygon.centroid
+            st.metric("Center Longitude", f"{centroid.x:.4f}°")
+        with col2:
+            st.metric("Center Latitude", f"{centroid.y:.4f}°")
+        with col3:
+            area_sq_km = selected_polygon.area * 111 * 111
+            st.metric("Area", f"{area_sq_km:.2f} km²")
+        
+        # Download button
+        if st.button("🛰️ Download Sentinel-2 Data", type="primary"):
+            date_str = selected_date.strftime('%Y-%m-%d')
+            
+            with st.spinner("Downloading Sentinel-2 data..."):
+                downloaded_path = download_sentinel2_with_gees2(
+                    date_str, 
+                    selected_polygon, 
+                    cloud_cover_limit
+                )
+            
+            if downloaded_path:
+                st.session_state.downloaded_image_path = downloaded_path
+                st.session_state.selected_polygon = selected_polygon
+                st.session_state.selected_region_idx = selected_region_idx
+                st.success("✅ Sentinel-2 data downloaded successfully!")
+                st.info("🔄 Go to the 'Water Body Detection' tab to analyze the image.")
+            else:
+                st.error("❌ Failed to download Sentinel-2 data. Try adjusting the date or cloud cover limit.")
+        
+    else:
+        st.warning("Please draw and save at least one region on the map first.")
+
+# Second tab - Water Body Detection
+with tab2:
+    st.header("Water Body Detection")
+    
+    # Check if we have downloaded data
+    if 'downloaded_image_path' not in st.session_state:
+        st.warning("⚠️ Please download Sentinel-2 data first in the 'Region Selection & Download' tab.")
+        st.stop()
+    
+    # Display current data info
+    with st.expander("Current Data Information", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info(f"📅 **Date:** {st.session_state.selected_date}")
+        
+        with col2:
+            region_num = st.session_state.selected_region_idx + 1
+            st.info(f"🗺️ **Region:** {region_num}")
+        
+        with col3:
+            polygon = st.session_state.selected_polygon
+            area_sq_km = polygon.area * 111 * 111
+            st.info(f"📏 **Area:** {area_sq_km:.2f} km²")
+    
+    # Model information
+    st.subheader("Model Information", divider="blue")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info("**Model:** Water Segmentation Model")
+        st.info("**Architecture:** U-Net with ResNet34 encoder")
+    with col2:
+        st.info("**Input Bands:** B2, B3, B4, B8, B11, B12")
+        st.info("**Input Size:** 224x224 pixels")
+    
+    # Processing parameters
+    st.subheader("Processing Parameters", divider="green")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        threshold = st.slider(
+            "Detection Threshold",
+            min_value=0.1,
+            max_value=0.9,
+            value=0.5,
+            step=0.1,
+            help="Threshold for water/no-water classification"
+        )
+    
+    with col2:
+        apply_morphology = st.checkbox(
+            "Apply Morphological Operations",
+            value=True,
+            help="Apply erosion/dilation to clean up the water mask"
+        )
+        
+        if apply_morphology:
+            kernel_size = st.slider(
+                "Morphological Kernel Size",
+                min_value=1,
+                max_value=7,
+                value=3,
+                step=2,
+                help="Size of morphological operations kernel"
+            )
+    
+    # Start processing button
+    if st.button("🔍 Start Water Body Detection", type="primary"):
+        # Load model
+        with st.spinner("Loading model..."):
+            model, device = load_water_model(model_path)
+        
+        if model is not None:
+            st.session_state.model = model
+            st.session_state.device = device
+            st.session_state.model_loaded = True
+            st.session_state.threshold = threshold
+            
+            # Start processing
+            success = process_water_detection(
+                st.session_state.downloaded_image_path,
+                st.session_state.selected_polygon,
+                st.session_state.selected_region_idx + 1
+            )
+            
+            if success and apply_morphology:
+                st.info("Applying morphological operations...")
+                
+                # Apply morphological operations to the result
+                if 'water_detection_result' in st.session_state:
+                    # Apply erosion followed by dilation (opening operation)
+                    from scipy import ndimage
+                    
+                    # Convert to binary
+                    binary_mask = (st.session_state.water_detection_result > 0).astype(np.uint8)
+                    
+                    # Create structuring element
+                    kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+                    
+                    # Apply opening (erosion followed by dilation)
+                    opened = ndimage.binary_opening(binary_mask, structure=kernel)
+                    
+                    # Apply closing (dilation followed by erosion)
+                    cleaned_mask = ndimage.binary_closing(opened, structure=kernel).astype(np.uint8) * 255
+                    
+                    # Update the result
+                    st.session_state.water_detection_result = cleaned_mask
+                    
+                    # Save the cleaned result
+                    if 'water_detection_path' in st.session_state:
+                        base_path = st.session_state.water_detection_path
+                        cleaned_path = base_path.replace('.tif', '_cleaned.tif')
+                        
+                        # Read metadata from original
+                        with rasterio.open(base_path) as src:
+                            meta = src.meta.copy()
+                        
+                        # Save cleaned mask
+                        with rasterio.open(cleaned_path, 'w', **meta) as dst:
+                            dst.write(cleaned_mask, 1)
+                        
+                        st.session_state.water_detection_path = cleaned_path
+                    
+                    st.success("✅ Morphological operations applied successfully!")
+            
+        else:
+            st.error("❌ Failed to load the water segmentation model. Please check the model path.")
+    
+    # Display results if available
+    if 'water_detection_result' in st.session_state and st.session_state.water_detection_result is not None:
+        st.subheader("Water Detection Results", divider="blue")
+        
+        # Create side-by-side comparison
         col1, col2 = st.columns(2)
         
         with col1:
-           # st.markdown('<div class="time-selection-card">', unsafe_allow_html=True)
-            st.markdown('<div class="time-selection-header">Before Image Year</div>', unsafe_allow_html=True)
+            st.write("**Original Sentinel-2 Image (RGB)**")
             
-            # Year dropdown for "Before" image
-            before_year = st.selectbox(
-                "Select Year",
-                options=["2019", "2020", "2021", "2022", "2023", "2024"],
-                index=2,  # Default to 2021
-                key="before_year_select"
-            )
-            st.session_state.before_year = before_year
+            # Create RGB visualization
+            clipped_img = st.session_state.clipped_img
+            rgb_bands = [2, 1, 0]  # B4, B3, B2 for RGB
+            rgb = np.zeros((clipped_img.shape[1], clipped_img.shape[2], 3), dtype=np.float32)
             
-            # Display the selected date range
-            before_start_date = f"{before_year}-{start_month:02d}-01"
-            before_end_date = f"{before_year}-{end_month:02d}-{30 if end_month in [4, 6, 9, 11] else 31 if end_month != 2 else 29 if int(before_year) % 4 == 0 else 28}"
-            st.info(f"Selected period: {before_start_date} to {before_end_date}")
+            for i, band in enumerate(rgb_bands):
+                if band < clipped_img.shape[0]:
+                    band_data = clipped_img[band]
+                    min_val = np.percentile(band_data, 2)
+                    max_val = np.percentile(band_data, 98)
+                    rgb[:, :, i] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
             
-            st.markdown('</div>', unsafe_allow_html=True)
+            fig, ax = plt.subplots(figsize=(8, 8))
+            ax.imshow(rgb)
+            ax.set_title("Original Image")
+            ax.axis('off')
+            st.pyplot(fig)
         
         with col2:
-            #st.markdown('<div class="time-selection-card">', unsafe_allow_html=True)
-            st.markdown('<div class="time-selection-header">After Image Year</div>', unsafe_allow_html=True)
+            st.write("**Detected Water Bodies**")
             
-            # Year dropdown for "After" image
-            after_year = st.selectbox(
-                "Select Year",
-                options=["2019", "2020", "2021", "2022", "2023", "2024"],
-                index=5,  # Default to 2024
-                key="after_year_select"
-            )
-            st.session_state.after_year = after_year
-            
-            # Display the selected date range
-            after_start_date = f"{after_year}-{start_month:02d}-01"
-            after_end_date = f"{after_year}-{end_month:02d}-{30 if end_month in [4, 6, 9, 11] else 31 if end_month != 2 else 29 if int(after_year) % 4 == 0 else 28}"
-            st.info(f"Selected period: {after_start_date} to {after_end_date}")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Validate time periods
-        if int(before_year) > int(after_year):
-            st.warning("⚠️ The 'Before' year is later than the 'After' year. This may lead to unexpected results.")
-
-with tab2:
-    st.header("Before Image Analysis")
-    
-    # Check if model path exists
-    if not os.path.exists(model_path):
-        st.warning(f"Model file not found at: {model_path}. Please update the path to your model file.")
-    
-    # Automated processing section
-    st.subheader("Automated Image Processing")
-    
-    if len(st.session_state.drawn_polygons) > 0:
-        # Let user select which polygon to use for processing
-        polygon_index = st.selectbox(
-            "Select region to process",
-            range(len(st.session_state.drawn_polygons)),
-            format_func=lambda i: f"Region {i+1}",
-            key="polygon_selector_before"
-        )
-        
-        selected_polygon = st.session_state.drawn_polygons[polygon_index]
-        region_number = polygon_index + 1 # For naming files
-        
-        # Calculate and display area
-        area_sq_km = selected_polygon.area * 111 * 111  # Approximate conversion from degrees to km²
-        st.info(f"Selected region area: ~{area_sq_km:.2f} km²")
-        
-        # Warn if area is large
-        if area_sq_km > 40:
-            st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit, which may take longer.")
-        
-        # Display selected time period
-        year = st.session_state.before_year
-        start_month = st.session_state.start_month
-        end_month = st.session_state.end_month
-        months = ["January", "February", "March", "April", "May", "June", 
-                 "July", "August", "September", "October", "November", "December"]
-        
-        st.info(f"Selected time period: {months[start_month-1]} to {months[end_month-1]} {year}")
-        
-        # Cloud cover slider
-        cloud_cover = st.slider("Maximum Cloud Cover (%)", 0, 100, 15, key="cloud_cover_before")
-        
-        # Process button
-        if st.button(f"Download and Process {year} Image ({months[start_month-1]}-{months[end_month-1]} Median)", key="process_before"):
-            st.info(f"Starting download of Sentinel-2 median composite for {months[start_month-1]}-{months[end_month-1]} {year}...")
-            
-            # Download Sentinel-2 image using GEES2Downloader
-            sentinel_before_path = download_sentinel2_with_gees2(year, selected_polygon, start_month, end_month, cloud_cover)
-            
-            if sentinel_before_path:
-                # Call the processing function
-                success = process_image(
-                    image_path=sentinel_before_path,
-                    year=year,
-                    selected_polygon=selected_polygon,
-                    region_number=region_number
-                )
-                
-                if success:
-                    st.success(f"✅ {year} image processing complete! You can now proceed to the Change Detection tab.")
-                else:
-                    st.error(f"❌ There was an error processing the {year} image. Please check the error messages above.")
-            else:
-                st.error("There is no proper image for download. Try increasing the cloud cover percentage or selecting a different region or time period.")
-        
-        # Show  status
-        if 'reconstructed_before_image' in st.session_state and st.session_state.reconstructed_before_image is not None:
-            st.success("✅ 'Before' image has already been processed successfully.")
-            
-            # Show the reconstructed image
-            st.subheader(" 'Before' Classification Result")
             fig, ax = plt.subplots(figsize=(8, 8))
-            ax.imshow(st.session_state.reconstructed_before_image, cmap='gray')
-            ax.set_title(f"{year} Building Classification")
+            ax.imshow(st.session_state.water_detection_result, cmap='Blues')
+            ax.set_title("Water Detection Result")
             ax.axis('off')
             st.pyplot(fig)
-    else:
-        st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
-
-# Third tab - Sentinel-2 "After" Image Analysis
-with tab3:
-    st.header("After Image Analysis")
-    
-    # Check if model path exists
-    if not os.path.exists(model_path):
-        st.warning(f"Model file not found at: {model_path}. Please update the path to your model file.")
-    
-    # Automated processing section
-    st.subheader("Automated Image Processing")
-    
-    if len(st.session_state.drawn_polygons) > 0:
-        # Let user select which polygon to use for processing
-        polygon_index = st.selectbox(
-            "Select region to process",
-            range(len(st.session_state.drawn_polygons)),
-            format_func=lambda i: f"Region {i+1}",
-            key="polygon_selector_after"
-        )
         
-        selected_polygon = st.session_state.drawn_polygons[polygon_index]
-        region_number = polygon_index + 1 # For naming files
+        # Overlay visualization
+        st.write("**Overlay: Water Bodies on Original Image**")
         
-        # Calculate and display area
-        area_sq_km = selected_polygon.area * 111 * 111  # Approximate conversion from degrees to km²
-        st.info(f"Selected region area: ~{area_sq_km:.2f} km²")
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.imshow(rgb)
         
-        # Warn if area is large
-        if area_sq_km > 40:
-            st.warning(f"Selected area is large ({area_sq_km:.2f} km²). Processing will use tiling to handle the download size limit, which may take longer.")
+        # Create water overlay (semi-transparent blue)
+        water_overlay = np.zeros((*st.session_state.water_detection_result.shape, 4))
+        water_mask = st.session_state.water_detection_result > 0
+        water_overlay[water_mask] = [0, 0.5, 1, 0.6]  # Semi-transparent blue
         
-        # Display selected time period
-        year = st.session_state.after_year
-        start_month = st.session_state.start_month
-        end_month = st.session_state.end_month
-        months = ["January", "February", "March", "April", "May", "June", 
-                 "July", "August", "September", "October", "November", "December"]
-        
-        st.info(f"Selected time period: {months[start_month-1]} to {months[end_month-1]} {year}")
-        
-        # Cloud cover slider
-        cloud_cover = st.slider("Maximum Cloud Cover (%)", 0, 100, 15, key="cloud_cover_after")
-        
-        # Process button
-        if st.button(f"Download and Process {year} Image ({months[start_month-1]}-{months[end_month-1]} Median)", key="process_after"):
-            st.info(f"Starting download of Sentinel-2 median composite for {months[start_month-1]}-{months[end_month-1]} {year}...")
-            
-            # Download Sentinel-2 image using GEES2Downloader
-            sentinel_after_path = download_sentinel2_with_gees2(year, selected_polygon, start_month, end_month, cloud_cover)
-            
-            if sentinel_after_path:
-                # Call the processing function
-                success = process_image(
-                    image_path=sentinel_after_path,
-                    year=year,
-                    selected_polygon=selected_polygon,
-                    region_number=region_number
-                )
-                
-                if success:
-                    st.success(f"✅ {year} image processing complete! You can now proceed to the Change Detection tab.")
-                else:
-                    st.error(f"❌ There was an error processing the {year} image. Please check the error messages above.")
-            else:
-                st.error("There is no proper image for download. Try increasing the cloud cover percentage or selecting a different region or time period.")
-        
-        # Show  status
-        if 'reconstructed_after_image' in st.session_state and st.session_state.reconstructed_after_image is not None:
-            st.success("✅ 'After' image has already been processed successfully.")
-            
-            # Show the reconstructed image
-            st.subheader("Current 'After' Classification Result")
-            fig, ax = plt.subplots(figsize=(8, 8))
-            ax.imshow(st.session_state.reconstructed_after_image, cmap='gray')
-            ax.set_title(f"{year} Building Classification")
-            ax.axis('off')
-            st.pyplot(fig)
-    else:
-        st.info("No regions have been selected yet. Please go to the Region Selection tab and draw a polygon.")
-
-
-with tab4: # This line is commented out as the code below is the content of tab4
-    st.header("Building Change Detection")
-    
-    # Import required libraries (ensure these are available in your environment)
-    import tempfile
-    import os
-    import time
-    import rasterio
-    from rasterio.warp import calculate_default_transform, reproject, Resampling
-    from rasterio.mask import mask  # Not explicitly used in this snippet, but kept from original
-    from shapely.geometry import mapping, box  # Not explicitly used in this snippet, but kept from original
-    import io
-    from PIL import Image
-    import folium
-    from folium import plugins
-    # from streamlit_folium import st_folium # No longer needed for display
-    import streamlit.components.v1 as components  # For st.components.v1.html
-    import json  # Not explicitly used in this snippet, but kept from original
-    import geopandas as gpd
-    import base64
-    import numpy as np  # Ensure numpy is imported
-    import matplotlib.pyplot as plt  # Ensure matplotlib is imported
-    
-    # FIXED EROSION FUNCTION - Now properly implements morphological erosion
-    def apply_erosion(mask, kernel_size_val):
-        """
-        Apply morphological erosion to a binary mask.
-        
-        Args:
-            mask: Binary mask (0-255 values)
-            kernel_size_val: Size of the erosion kernel
-            
-        Returns:
-            Eroded mask
-        """
-        try:
-            # Try to use OpenCV first (most efficient)
-            import cv2
-            
-            # Convert mask to binary (0 or 1) if it's in 0-255 range
-            if mask.max() > 1:
-                binary_mask = (mask > 0).astype(np.uint8)
-            else:
-                binary_mask = mask.astype(np.uint8)
-            
-            # Create erosion kernel
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size_val, kernel_size_val))
-            
-            # Apply erosion
-            eroded = cv2.erode(binary_mask, kernel, iterations=1)
-            
-            # Convert back to 0-255 range to match original mask format
-            eroded = eroded * 255
-            
-            st.success(f"✅ Applied erosion with OpenCV using kernel size {kernel_size_val}")
-            return eroded.astype(mask.dtype)
-            
-        except ImportError:
-            try:
-                # Fallback to scipy if OpenCV is not available
-                from scipy import ndimage
-                from scipy.ndimage import binary_erosion
-                
-                # Convert mask to binary (0 or 1) if it's in 0-255 range
-                if mask.max() > 1:
-                    binary_mask = (mask > 0).astype(bool)
-                else:
-                    binary_mask = mask.astype(bool)
-                
-                # Create circular structuring element
-                y, x = np.ogrid[-kernel_size_val//2:kernel_size_val//2+1, 
-                                -kernel_size_val//2:kernel_size_val//2+1]
-                kernel = x*x + y*y <= (kernel_size_val//2)**2
-                
-                # Apply erosion
-                eroded = binary_erosion(binary_mask, structure=kernel)
-                
-                # Convert back to 0-255 range to match original mask format
-                eroded = eroded.astype(np.uint8) * 255
-                
-                st.success(f"✅ Applied erosion with SciPy using kernel size {kernel_size_val}")
-                return eroded.astype(mask.dtype)
-                
-            except ImportError:
-                # Manual implementation as last resort
-                st.warning("Neither OpenCV nor SciPy available. Using basic manual erosion (slower).")
-                
-                # Convert mask to binary (0 or 1) if it's in 0-255 range
-                if mask.max() > 1:
-                    binary_mask = (mask > 0).astype(np.uint8)
-                else:
-                    binary_mask = mask.astype(np.uint8)
-                
-                # Create a simple manual erosion
-                eroded = np.zeros_like(binary_mask)
-                pad_size = kernel_size_val // 2
-                
-                # Pad the image
-                padded = np.pad(binary_mask, pad_size, mode='constant', constant_values=0)
-                
-                # Apply erosion manually
-                for i in range(binary_mask.shape[0]):
-                    for j in range(binary_mask.shape[1]):
-                        # Check if all pixels in the kernel neighborhood are 1
-                        neighborhood = padded[i:i+kernel_size_val, j:j+kernel_size_val]
-                        if np.all(neighborhood == 1):
-                            eroded[i, j] = 1
-                
-                # Convert back to 0-255 range
-                eroded = eroded * 255
-                
-                st.info(f"Applied manual erosion using kernel size {kernel_size_val}")
-                return eroded.astype(mask.dtype)
-        
-        except Exception as e:
-            st.error(f"Error in erosion operation: {str(e)}")
-            return mask  # Return original mask if erosion fails
-    
-    
-    # 1) Retrieve the processed classification arrays
-    before_year = st.session_state.get("before_year", "2021")
-    after_year = st.session_state.get("after_year", "2024")
-    
-    # Ensure both exist
-    if (
-        "reconstructed_before_image" not in st.session_state or
-        "reconstructed_after_image" not in st.session_state
-    ):
-        st.warning("Please process both the Before and After images first (tabs 2 & 3).")
-        st.stop()
-    
-    img_before = st.session_state.reconstructed_before_image
-    img_after = st.session_state.reconstructed_after_image
-    
-    # 2) Dimension check
-    if img_before.shape != img_after.shape:
-        st.error("The Before/After images have different shapes.")
-        st.info(f"{before_year}: {img_before.shape}, {after_year}: {img_after.shape}")
-        st.stop()
-    
-    # 3) Compute raw change mask (new buildings)
-    binary_before = (img_before > 0).astype(np.uint8)
-    binary_after = (img_after > 0).astype(np.uint8)
-    raw_mask = ((binary_after == 1) & (binary_before == 0)).astype(np.uint8) * 255
-    st.session_state.change_detection_result = raw_mask
-    
-    # 4) Display raw results side by side
-    st.subheader("Raw Change Detection")
-    fig, axs = plt.subplots(1, 3, figsize=(18, 5))
-    axs[0].imshow(binary_before, cmap="gray")
-    axs[0].set_title(f"{before_year} Classification")
-    axs[0].axis("off")
-    axs[1].imshow(binary_after, cmap="gray")
-    axs[1].set_title(f"{after_year} Classification")
-    axs[1].axis("off")
-    axs[2].imshow(raw_mask, cmap="hot")
-    axs[2].set_title("New Buildings")
-    axs[2].axis("off")
-    st.pyplot(fig)
-    
-    # 5) Erosion UI - ENHANCED WITH BETTER INFORMATION
-    st.subheader("Refine with Morphological Erosion")
-    
-    st.info("""
-    **Morphological Erosion** helps remove small noise and isolated pixels from the change detection:
-    - **Smaller kernel sizes (2-3)**: Remove small noise while preserving most buildings
-    - **Medium kernel sizes (4-5)**: Remove medium-sized noise and thin connections
-    - **Larger kernel sizes (7-9)**: More aggressive filtering, may remove small buildings
-    """)
-    
-    kernel = st.selectbox(
-        "Kernel size",
-        [2, 3, 4, 5, 7, 9],
-        index=0,
-        key="tab4_erosion_kernel_size",
-        help="Larger kernel sizes will remove more noise but may also remove small valid buildings"
-    )
-    
-    # Show statistics about the raw mask
-    total_change_pixels = np.sum(raw_mask > 0)
-    total_pixels = raw_mask.size
-    change_percentage = (total_change_pixels / total_pixels) * 100
-    
-    st.write(f"**Raw Change Detection Statistics:**")
-    st.write(f"- Total pixels with changes: {total_change_pixels:,}")
-    st.write(f"- Change area percentage: {change_percentage:.3f}%")
-    
-    if st.button("Apply Erosion", key="tab4_apply_erosion_btn"):
-        with st.spinner(f"Applying morphological erosion with kernel size {kernel}..."):
-            eroded = apply_erosion(raw_mask, kernel)
-            st.session_state.eroded_result = eroded
-            
-            # Calculate statistics for eroded result
-            eroded_change_pixels = np.sum(eroded > 0)
-            eroded_change_percentage = (eroded_change_pixels / total_pixels) * 100
-            pixels_removed = total_change_pixels - eroded_change_pixels
-            removal_percentage = (pixels_removed / total_change_pixels) * 100 if total_change_pixels > 0 else 0
-            
-            st.write(f"**Erosion Results:**")
-            st.write(f"- Remaining change pixels: {eroded_change_pixels:,}")
-            st.write(f"- Remaining change percentage: {eroded_change_percentage:.3f}%")
-            st.write(f"- Pixels removed: {pixels_removed:,} ({removal_percentage:.1f}% reduction)")
-
-        # Display comparison
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        ax1.imshow(raw_mask, cmap="hot")
-        ax1.set_title(f"Original Mask\n({total_change_pixels:,} change pixels)")
-        ax1.axis("off")
-        ax2.imshow(eroded, cmap="hot")
-        ax2.set_title(f"Eroded (k={kernel})\n({eroded_change_pixels:,} change pixels)")
-        ax2.axis("off")
+        ax.imshow(water_overlay)
+        ax.set_title("Water Bodies Overlay")
+        ax.axis('off')
         st.pyplot(fig)
-    
-    # 6) Interactive Map only once we have eroded_result
-    if "eroded_result" in st.session_state:
-        st.subheader("Interactive Map")
-        st.info("Use the layer control in the top-right to toggle layers on/off and adjust opacity. Click the fullscreen button to view the map in fullscreen mode.")
-
-        try:
-            if ('region_number' in st.session_state and
-                'drawn_polygons' in st.session_state and
-                st.session_state.region_number <= len(st.session_state.drawn_polygons)):
-                selected_polygon = st.session_state.drawn_polygons[st.session_state.region_number - 1]
-                centroid = selected_polygon.centroid
-                center = [centroid.y, centroid.x]
-            else:
-                center = [35.6892, 51.3890]
-                selected_polygon = None
-
-            temp_dir = tempfile.gettempdir()
-            has_sentinel_data = (
-                'clipped_img' in st.session_state and
-                'clipped_img_2024' in st.session_state and
-                'clipped_meta' in st.session_state
-            )
-
-            if 'clipped_meta' in st.session_state:
-                utm_transform = st.session_state.clipped_meta['transform']
-                utm_crs = st.session_state.clipped_meta['crs']
-                utm_height = st.session_state.clipped_img.shape[1]
-                utm_width = st.session_state.clipped_img.shape[2]
-                if selected_polygon:
-                    bounds = selected_polygon.bounds
-                else:
-                    bounds = None
-            else:
-                if selected_polygon:
-                    bounds = selected_polygon.bounds
-                else:
-                    bounds = None
-                utm_crs = None
-                utm_transform = None
-                utm_height = binary_before.shape[0]
-                utm_width = binary_before.shape[1]
-
-            before_class_wgs84_path = None
-            after_class_wgs84_path = None
-            change_mask_wgs84_path = None
-            before_rgb_wgs84_path = None
-            after_rgb_wgs84_path = None
-
-            target_transform = None
-            target_width = None
-            target_height = None
-            target_bounds = None
-
-            if utm_crs is not None and utm_transform is not None:
-                dst_crs = 'EPSG:4326'
-
-                before_class_utm_path = os.path.join(temp_dir, f"before_class_utm_{before_year}_{time.time()}.tif")
-                with rasterio.open(
-                    before_class_utm_path, 'w', driver='GTiff',
-                    height=binary_before.shape[0], width=binary_before.shape[1],
-                    count=1, dtype=binary_before.dtype, crs=utm_crs, transform=utm_transform
-                ) as dst:
-                    dst.write(binary_before, 1)
-
-                before_class_wgs84_path = os.path.join(temp_dir, f"before_class_wgs84_{before_year}_{time.time()}.tif")
-                with rasterio.open(before_class_utm_path) as src:
-                    dst_transform_calc, dst_width_calc, dst_height_calc = calculate_default_transform(
-                        src.crs, dst_crs, src.width, src.height, *src.bounds)
-                    target_transform = dst_transform_calc
-                    target_width = dst_width_calc
-                    target_height = dst_height_calc
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': dst_crs, 'transform': target_transform,
-                        'width': target_width, 'height': target_height
+        
+        # Statistics
+        st.subheader("Detection Statistics")
+        
+        total_pixels = st.session_state.water_detection_result.size
+        water_pixels = np.sum(st.session_state.water_detection_result > 0)
+        water_percentage = (water_pixels / total_pixels) * 100
+        
+        # Estimate water area (assuming 10m resolution)
+        water_area_m2 = water_pixels * 100  # 10m x 10m = 100 m²
+        water_area_km2 = water_area_m2 / 1_000_000
+        water_area_hectares = water_area_m2 / 10_000
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Water Coverage", f"{water_percentage:.2f}%")
+        
+        with col2:
+            st.metric("Water Area (km²)", f"{water_area_km2:.3f}")
+        
+        with col3:
+            st.metric("Water Area (hectares)", f"{water_area_hectares:.1f}")
+        
+        with col4:
+            st.metric("Water Pixels", f"{water_pixels:,}")
+        
+        # Download section
+        st.subheader("Download Results")
+        
+        if 'water_detection_path' in st.session_state:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Download water mask
+                with open(st.session_state.water_detection_path, "rb") as file:
+                    st.download_button(
+                        label="📥 Download Water Mask (GeoTIFF)",
+                        data=file,
+                        file_name=f"water_mask_{st.session_state.selected_date}.tif",
+                        mime="image/tiff"
+                    )
+            
+            with col2:
+                # Create and download a summary report
+                report_data = {
+                    "date": str(st.session_state.selected_date),
+                    "region": f"Region {st.session_state.selected_region_idx + 1}",
+                    "total_area_km2": float(st.session_state.selected_polygon.area * 111 * 111),
+                    "water_coverage_percent": float(water_percentage),
+                    "water_area_km2": float(water_area_km2),
+                    "water_area_hectares": float(water_area_hectares),
+                    "total_pixels": int(total_pixels),
+                    "water_pixels": int(water_pixels),
+                    "model": "U-Net with ResNet34",
+                    "threshold": float(threshold) if 'threshold' in st.session_state else 0.5
+                }
+                
+                report_json = json.dumps(report_data, indent=2)
+                
+                st.download_button(
+                    label="📊 Download Analysis Report (JSON)",
+                    data=report_json,
+                    file_name=f"water_analysis_report_{st.session_state.selected_date}.json",
+                    mime="application/json"
+                )
+        
+        # Additional analysis tools
+        with st.expander("🔧 Advanced Analysis Tools"):
+            st.write("**Threshold Analysis**")
+            
+            if st.button("Analyze Different Thresholds"):
+                thresholds = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+                threshold_results = []
+                
+                for thresh in thresholds:
+                    # Apply threshold to the raw prediction (if available)
+                    # For now, we'll simulate this with the current result
+                    temp_mask = st.session_state.water_detection_result > (thresh * 255)
+                    temp_water_pixels = np.sum(temp_mask)
+                    temp_percentage = (temp_water_pixels / total_pixels) * 100
+                    temp_area_km2 = (temp_water_pixels * 100) / 1_000_000
+                    
+                    threshold_results.append({
+                        'threshold': thresh,
+                        'water_percentage': temp_percentage,
+                        'water_area_km2': temp_area_km2
                     })
-                    with rasterio.open(before_class_wgs84_path, 'w', **dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1), destination=rasterio.band(dst, 1),
-                            src_transform=src.transform, src_crs=src.crs,
-                            dst_transform=target_transform, dst_crs=dst_crs,
-                            resampling=Resampling.nearest
-                        )
-                        target_bounds = dst.bounds
-
-                after_class_utm_path = os.path.join(temp_dir, f"after_class_utm_{after_year}_{time.time()}.tif")
-                with rasterio.open(
-                    after_class_utm_path, 'w', driver='GTiff',
-                    height=binary_after.shape[0], width=binary_after.shape[1],
-                    count=1, dtype=binary_after.dtype, crs=utm_crs, transform=utm_transform
-                ) as dst:
-                    dst.write(binary_after, 1)
-
-                after_class_wgs84_path = os.path.join(temp_dir, f"after_class_wgs84_{after_year}_{time.time()}.tif")
-                with rasterio.open(after_class_utm_path) as src:
-                    dst_kwargs = src.meta.copy()
-                    dst_kwargs.update({
-                        'crs': dst_crs, 'transform': target_transform,
-                        'width': target_width, 'height': target_height
-                    })
-                    with rasterio.open(after_class_wgs84_path, 'w', **dst_kwargs) as dst:
-                        reproject(
-                            source=rasterio.band(src, 1), destination=rasterio.band(dst, 1),
-                            src_transform=src.transform, src_crs=src.crs,
-                            dst_transform=target_transform, dst_crs=dst_crs,
-                            resampling=Resampling.nearest
-                        )
-
-                if "eroded_result" in st.session_state:
-                    change_mask_utm_path = os.path.join(temp_dir, f"change_mask_utm_{time.time()}.tif")
-                    with rasterio.open(
-                        change_mask_utm_path, 'w', driver='GTiff',
-                        height=st.session_state.eroded_result.shape[0], width=st.session_state.eroded_result.shape[1],
-                        count=1, dtype=st.session_state.eroded_result.dtype, crs=utm_crs, transform=utm_transform
-                    ) as dst:
-                        dst.write(st.session_state.eroded_result, 1)
-
-                    change_mask_wgs84_path = os.path.join(temp_dir, f"change_mask_wgs84_{time.time()}.tif")
-                    with rasterio.open(change_mask_utm_path) as src:
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': dst_crs, 'transform': target_transform,
-                            'width': target_width, 'height': target_height
-                        })
-                        with rasterio.open(change_mask_wgs84_path, 'w', **dst_kwargs) as dst:
-                            reproject(
-                                source=rasterio.band(src, 1), destination=rasterio.band(dst, 1),
-                                src_transform=src.transform, src_crs=src.crs,
-                                dst_transform=target_transform, dst_crs=dst_crs,
-                                resampling=Resampling.nearest
-                            )
-
-                if has_sentinel_data and target_bounds is not None:
-                    before_sentinel_utm_path = os.path.join(temp_dir, f"before_sentinel_utm_{before_year}_{time.time()}.tif")
-                    before_bands = st.session_state.clipped_img[:4, :, :]
-                    with rasterio.open(
-                        before_sentinel_utm_path, 'w', driver='GTiff',
-                        height=before_bands.shape[1], width=before_bands.shape[2],
-                        count=4, dtype=before_bands.dtype, crs=utm_crs, transform=utm_transform
-                    ) as dst:
-                        for i in range(4):
-                            dst.write(before_bands[i], i+1)
-
-                    before_sentinel_wgs84_path = os.path.join(temp_dir, f"before_sentinel_wgs84_{before_year}_{time.time()}.tif")
-                    with rasterio.open(before_sentinel_utm_path) as src:
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': 'EPSG:4326', 'transform': target_transform,
-                            'width': target_width, 'height': target_height
-                        })
-                        with rasterio.open(before_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                            for i in range(1, 5):
-                                reproject(
-                                    source=rasterio.band(src, i), destination=rasterio.band(dst, i),
-                                    src_transform=src.transform, src_crs=src.crs,
-                                    dst_transform=target_transform, dst_crs='EPSG:4326',
-                                    resampling=Resampling.bilinear
-                                )
-
-                    after_sentinel_utm_path = os.path.join(temp_dir, f"after_sentinel_utm_{after_year}_{time.time()}.tif")
-                    after_bands = st.session_state.clipped_img_2024[:4, :, :]
-                    with rasterio.open(
-                        after_sentinel_utm_path, 'w', driver='GTiff',
-                        height=after_bands.shape[1], width=after_bands.shape[2],
-                        count=4, dtype=after_bands.dtype, crs=utm_crs, transform=utm_transform
-                    ) as dst:
-                        for i in range(4):
-                            dst.write(after_bands[i], i+1)
-
-                    after_sentinel_wgs84_path = os.path.join(temp_dir, f"after_sentinel_wgs84_{after_year}_{time.time()}.tif")
-                    with rasterio.open(after_sentinel_utm_path) as src:
-                        dst_kwargs = src.meta.copy()
-                        dst_kwargs.update({
-                            'crs': 'EPSG:4326', 'transform': target_transform,
-                            'width': target_width, 'height': target_height
-                        })
-                        with rasterio.open(after_sentinel_wgs84_path, 'w', **dst_kwargs) as dst:
-                            for i in range(1, 5):
-                                reproject(
-                                    source=rasterio.band(src, i), destination=rasterio.band(dst, i),
-                                    src_transform=src.transform, src_crs=src.crs,
-                                    dst_transform=target_transform, dst_crs='EPSG:4326',
-                                    resampling=Resampling.bilinear
-                                )
-
-                    before_rgb_wgs84_path = os.path.join(temp_dir, f"before_rgb_wgs84_{before_year}_{time.time()}.tif")
-                    with rasterio.open(before_sentinel_wgs84_path) as src:
-                        profile = src.profile.copy()
-                        profile.update(count=3, dtype='uint8')
-                        with rasterio.open(before_rgb_wgs84_path, 'w', **profile) as dst:
-                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                            for i, band_idx in enumerate([3, 2, 1]):
-                                band_data = src.read(band_idx)
-                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
-                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
-                                if max_val > min_val:
-                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                                else:
-                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                            dst.write(rgb_data)
-
-                    after_rgb_wgs84_path = os.path.join(temp_dir, f"after_rgb_wgs84_{after_year}_{time.time()}.tif")
-                    with rasterio.open(after_sentinel_wgs84_path) as src:
-                        profile = src.profile.copy()
-                        profile.update(count=3, dtype='uint8')
-                        with rasterio.open(after_rgb_wgs84_path, 'w', **profile) as dst:
-                            rgb_data = np.zeros((3, src.height, src.width), dtype=np.uint8)
-                            for i, band_idx in enumerate([3, 2, 1]):
-                                band_data = src.read(band_idx)
-                                min_val = np.percentile(band_data[band_data > 0], 2) if np.any(band_data > 0) else 0
-                                max_val = np.percentile(band_data[band_data > 0], 98) if np.any(band_data > 0) else 1
-                                if max_val > min_val:
-                                    rgb_data[i] = np.clip((band_data - min_val) / (max_val - min_val) * 255, 0, 255).astype(np.uint8)
-                                else:
-                                    rgb_data[i] = np.zeros_like(band_data, dtype=np.uint8)
-                            dst.write(rgb_data)
-
-                st.subheader("Download Reprojected Data")
-                st.write("The following files have been reprojected from UTM to WGS84 coordinate system:")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if before_class_wgs84_path:
-                        with open(before_class_wgs84_path, "rb") as file:
-                            st.download_button(
-                                label=f"Download {before_year} Classification", data=file,
-                                file_name=f"before_classification_{before_year}_wgs84.tif", mime="image/tiff",
-                                key=f"download_before_class_{before_year}"
-                            )
-                with col2:
-                    if after_class_wgs84_path:
-                        with open(after_class_wgs84_path, "rb") as file:
-                            st.download_button(
-                                label=f"Download {after_year} Classification", data=file,
-                                file_name=f"after_classification_{after_year}_wgs84.tif", mime="image/tiff",
-                                key=f"download_after_class_{after_year}"
-                            )
-                with col3:
-                    if change_mask_wgs84_path:
-                        with open(change_mask_wgs84_path, "rb") as file:
-                            st.download_button(
-                                label="Download Change Mask", data=file,
-                                file_name=f"change_mask_{before_year}_{after_year}_wgs84.tif", mime="image/tiff",
-                                key="download_change_mask"
-                            )
-            else:
-                st.warning("No UTM coordinate information found. Files are not properly georeferenced.")
-                st.subheader("Download Data")
-                st.write("Note: These files are not georeferenced as UTM coordinate information was not available.")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    img = Image.fromarray((binary_before * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    st.download_button(
-                        label=f"Download {before_year} Classification", data=buf.getvalue(),
-                        file_name=f"before_classification_{before_year}.png", mime="image/png",
-                        key=f"download_before_class_png_{before_year}"
-                    )
-                with col2:
-                    img = Image.fromarray((binary_after * 255).astype(np.uint8))
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    st.download_button(
-                        label=f"Download {after_year} Classification", data=buf.getvalue(),
-                        file_name=f"after_classification_{after_year}.png", mime="image/png",
-                        key=f"download_after_class_png_{after_year}"
-                    )
-                with col3:
-                    img = Image.fromarray(st.session_state.eroded_result)
-                    buf = io.BytesIO()
-                    img.save(buf, format="PNG")
-                    st.download_button(
-                        label="Download Change Mask", data=buf.getvalue(),
-                        file_name=f"change_mask_{before_year}_{after_year}.png", mime="image/png",
-                        key="download_change_mask_png"
-                    )
-
-            def raster_to_folium_overlay(raster_path, colormap='viridis', opacity=0.7, is_binary=False, is_change_mask=False):
-                with rasterio.open(raster_path) as src:
-                    data = src.read(1)
-                    bounds = src.bounds
-                    bounds_latlon = [[bounds.bottom, bounds.left], [bounds.top, bounds.right]]
-                    if is_binary:
-                        rgba_array = np.zeros((data.shape[0], data.shape[1], 4), dtype=np.uint8)
-                        mask_val = data == 1
-                        if colormap == 'Greens':
-                            rgba_array[mask_val, 0:3] = [0, 255, 0]  # R, G, B
-                        elif colormap == 'Reds':
-                            rgba_array[mask_val, 0:3] = [255, 0, 0]  # R, G, B
-                        rgba_array[mask_val, 3] = 180  # Alpha for non-transparent parts
-                        pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    elif is_change_mask and data.max() > 1:  # CHANGED: Special handling for change mask with light pink
-                        rgba_array = np.zeros((data.shape[0], data.shape[1], 4), dtype=np.uint8)
-                        mask_val = data > 0
-                        rgba_array[mask_val, 0:3] = [255, 182, 193]  # Light pink RGB values
-                        rgba_array[mask_val, 3] = 200  # Semi-transparent for changes
-                        pil_img = Image.fromarray(rgba_array, 'RGBA')
-                    else:  # For RGB Sentinel or other single band with general colormap
-                        if src.count == 3:  # RGB
-                            rgb_data_src = src.read([1, 2, 3])
-                            # Ensure data is in range 0-255 if not already
-                            # This part might need adjustment based on input RGB GeoTIFF bit depth
-                            if rgb_data_src.dtype != np.uint8:
-                                # Simple scaling if not uint8, assumes it's scaled appropriately before saving
-                                rgb_data_src = np.clip(rgb_data_src, 0, 255).astype(np.uint8) if np.issubdtype(rgb_data_src.dtype, np.integer) else (rgb_data_src / rgb_data_src.max() * 255).astype(np.uint8)
-
-                            img_array_rgb = np.transpose(rgb_data_src, (1, 2, 0))
-                            pil_img = Image.fromarray(img_array_rgb)
-                        else:  # Single band, general colormap (e.g., viridis if not specified)
-                            import matplotlib.cm as cm  # Moved import here
-                            data_min, data_max = np.nanmin(data), np.nanmax(data)
-                            if data_max > data_min:
-                                data_norm = (data - data_min) / (data_max - data_min)
-                            else:
-                                data_norm = np.zeros_like(data)
-                            cmap_viridis = cm.get_cmap(colormap)  # Use get_cmap
-                            img_array_cmap = cmap_viridis(data_norm)
-                            img_array_cmap = (img_array_cmap[:, :, :3] * 255).astype(np.uint8)
-                            pil_img = Image.fromarray(img_array_cmap)
-
-                    img_buffer = io.BytesIO()
-                    pil_img.save(img_buffer, format='PNG')
-                    img_str = base64.b64encode(img_buffer.getvalue()).decode()
-                    return f"data:image/png;base64,{img_str}", bounds_latlon
-
-            # MAP CREATION - Google Satellite at 100% opacity (default), others with custom opacity
-            m = folium.Map(location=center, zoom_start=15, tiles=None)
-            plugins.Fullscreen(
-                position='topleft', title='Expand to fullscreen',
-                title_cancel='Exit fullscreen', force_separate_button=True
-            ).add_to(m)
-
-            # BASE LAYERS (Lower layer editor) - These are mutually exclusive background layers
-            # Google Satellite at 100% opacity (default - no custom CSS needed)
-            folium.TileLayer(
-                tiles='https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', 
-                attr='Google Satellite', 
-                name='Google Satellite', 
-                overlay=False,  # Base layer
-                control=True
-            ).add_to(m)
-            
-            # Google Maps with 70% opacity
-            google_maps_layer = folium.TileLayer(
-                tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', 
-                attr='Google Maps', 
-                name='Google Maps (70%)', 
-                overlay=False,  # Base layer
-                control=True
-            )
-            google_maps_layer.add_to(m)
-            
-            # OpenStreetMap with 50% opacity
-            osm_layer = folium.TileLayer(
-                tiles='OpenStreetMap', 
-                name='OpenStreetMap (50%)', 
-                overlay=False,  # Base layer
-                control=True,
-                show=True  # Default layer shown
-            )
-            osm_layer.add_to(m)
-            
-            # Add custom CSS to control opacity ONLY for Google Maps and OpenStreetMap
-            # Google Satellite remains at default 100% opacity
-            custom_css = """
-            <style>
-            /* OpenStreetMap opacity - 50% */
-            .leaflet-tile-pane .leaflet-layer:last-child {
-                opacity: 0.5 !important;
-            }
-            
-            /* Google Maps opacity - 70% */
-            .leaflet-tile-pane .leaflet-layer[style*="lyrs=m"] {
-                opacity: 0.7 !important;
-            }
-            
-            /* More specific selector for Google Maps tiles */
-            .leaflet-tile-pane .leaflet-layer img[src*="lyrs=m"] {
-                opacity: 0.7 !important;
-            }
-            
-            /* Ensure Google Satellite stays at 100% opacity */
-            .leaflet-tile-pane .leaflet-layer[style*="lyrs=s"] {
-                opacity: 1.0 !important;
-            }
-            
-            .leaflet-tile-pane .leaflet-layer img[src*="lyrs=s"] {
-                opacity: 1.0 !important;
-            }
-            </style>
-            """
-            m.get_root().html.add_child(folium.Element(custom_css))
-
-            # OVERLAY LAYERS (Upper layer editor) - These stack on top of base layers
-            # Add layers in reverse order of desired display (last added appears on top)
-            
-            if utm_crs is not None and utm_transform is not None:
-                # Sentinel RGB layers
-                if has_sentinel_data and before_rgb_wgs84_path and after_rgb_wgs84_path:
-                    try:
-                        img_data_before_rgb, bounds_before_rgb = raster_to_folium_overlay(before_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(
-                            image=img_data_before_rgb, 
-                            bounds=bounds_before_rgb, 
-                            opacity=0.8, 
-                            name=f"Before Sentinel-2 ({before_year})",
-                            overlay=True,  # Overlay layer
-                            control=True,
-                            show=False  # Hidden by default
-                        ).add_to(m)
-                        
-                        img_data_after_rgb, bounds_after_rgb = raster_to_folium_overlay(after_rgb_wgs84_path, opacity=0.8)
-                        folium.raster_layers.ImageOverlay(
-                            image=img_data_after_rgb, 
-                            bounds=bounds_after_rgb, 
-                            opacity=0.8, 
-                            name=f"After Sentinel-2 ({after_year})",
-                            overlay=True,  # Overlay layer
-                            control=True,
-                            show=False  # Hidden by default
-                        ).add_to(m)
-                    except Exception as e:
-                        st.warning(f"Could not add Sentinel-2 RGB layers: {str(e)}")
-
-                # Classification layers
-                if before_class_wgs84_path:
-                    try:
-                        img_data_before_class, bounds_before_class = raster_to_folium_overlay(before_class_wgs84_path, colormap='Greens', opacity=0.8, is_binary=True)
-                        folium.raster_layers.ImageOverlay(
-                            image=img_data_before_class, 
-                            bounds=bounds_before_class, 
-                            opacity=0.8, 
-                            name=f"Before Classification ({before_year})",
-                            overlay=True,  # Overlay layer
-                            control=True,
-                            show=True  # Shown by default
-                        ).add_to(m)
-                    except Exception as e:
-                        st.warning(f"Could not add before classification layer: {str(e)}")
-
-                if after_class_wgs84_path:
-                    try:
-                        img_data_after_class, bounds_after_class = raster_to_folium_overlay(after_class_wgs84_path, colormap='Reds', opacity=0.8, is_binary=True)
-                        folium.raster_layers.ImageOverlay(
-                            image=img_data_after_class, 
-                            bounds=bounds_after_class, 
-                            opacity=0.8, 
-                            name=f"After Classification ({after_year})",
-                            overlay=True,  # Overlay layer
-                            control=True,
-                            show=True  # Shown by default
-                        ).add_to(m)
-                    except Exception as e:
-                        st.warning(f"Could not add after classification layer: {str(e)}")
-
-                # Change detection mask (top overlay) - CHANGED TO USE LIGHT PINK
-                if change_mask_wgs84_path:
-                    try:
-                        img_data_change, bounds_change = raster_to_folium_overlay(change_mask_wgs84_path, opacity=0.8, is_change_mask=True)  # Changed to use is_change_mask=True
-                        folium.raster_layers.ImageOverlay(
-                            image=img_data_change, 
-                            bounds=bounds_change, 
-                            opacity=0.8, 
-                            name=f"Change Detection Mask ({before_year}-{after_year})",
-                            overlay=True,  # Overlay layer
-                            control=True,
-                            show=True  # Shown by default
-                        ).add_to(m)
-                    except Exception as e:
-                        st.warning(f"Could not add change detection mask layer: {str(e)}")
-
-                # Fit map to bounds
-                if target_bounds:
-                    m.fit_bounds([[target_bounds.bottom, target_bounds.left], [target_bounds.top, target_bounds.right]])
-            else:
-                st.warning("Cannot display non-georeferenced data in the interactive map.")
-
-            # Add layer control - this will now properly separate base layers from overlays
-            folium.LayerControl(position='topright', collapsed=False).add_to(m)
-
-            # Display the map
-            map_html = m.get_root().render()
-            components.html(map_html, height=600)
-
-            st.info("""
-            **Interactive Map Usage:**
-            - Click the **fullscreen button** (top-left) to view the map in fullscreen mode.
-            - **Base Layers (Lower Layer Editor)**: Choose one background - Google Satellite (100%), Google Maps (70% opacity), or OpenStreetMap (50% opacity).
-            - **Overlay Layers (Upper Layer Editor)**: Toggle data layers on/off - these appear above the base layer.
-            - Layer order is correct: overlays appear above base layers.
-            - Google Satellite remains at full opacity (100%) for clear satellite imagery.
-            - Google Maps opacity is set to 70% and OpenStreetMap opacity remains at 50%.
-            - Before classification appears in **green**, after classification in **red**.
-            - Change detection mask shows new buildings in **light pink**.
-            - All layers are perfectly aligned with the same extent.
-            """)
-
-        except Exception as e:
-            st.error(f"Error creating interactive map: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
-    else:
-        st.info("After applying erosion, the interactive map will appear here.")
+                
+                # Create a plot
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+                
+                thresholds_list = [r['threshold'] for r in threshold_results]
+                percentages = [r['water_percentage'] for r in threshold_results]
+                areas = [r['water_area_km2'] for r in threshold_results]
+                
+                ax1.plot(thresholds_list, percentages, 'b-o')
+                ax1.set_xlabel('Threshold')
+                ax1.set_ylabel('Water Coverage (%)')
+                ax1.set_title('Water Coverage vs Threshold')
+                ax1.grid(True)
+                
+                ax2.plot(thresholds_list, areas, 'r-o')
+                ax2.set_xlabel('Threshold')
+                ax2.set_ylabel('Water Area (km²)')
+                ax2.set_title('Water Area vs Threshold')
+                ax2.grid(True)
+                
+                plt.tight_layout()
+                st.pyplot(fig)
