@@ -195,11 +195,11 @@ def manual_download_fallback(file_id, local_filename):
         
         st.info("**Manual Download Instructions:**")
         st.markdown(f"""
-        1. **Open this link in a new browser tab:** 
+        1. **Open this  in a new browser tab:** 
         https://drive.google.com/file/d/{file_id}/view
         
         2. **If you see a permission error:**
-        - The file owner needs to change sharing to "Anyone with the link can view"
+        - The file owner needs to change sharing to "Anyone with the  can view"
         - Or you may need to request access
         
         3. **Click the Download button** (usually in the top-right corner)
@@ -231,7 +231,7 @@ def manual_download_fallback(file_id, local_filename):
         return None
 
 # Updated model loading section with the correct URL and file ID
-gdrive_model_url = "https://drive.google.com/file/d/1PwvxqaN7K3OLN8i2cyqqdhS7vburSmkH/view?usp=drive_link"
+gdrive_model_url = "https://drive.google.com/file/d/1PwvxqaN7K3OLN8i2cyqqdhS7vburSmkH/view?usp=sharing"
 model_path = "best_model.pth"  # Updated filename to match your preference
 
 # Download model if it doesn't exist locally
