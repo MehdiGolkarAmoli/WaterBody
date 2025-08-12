@@ -29,15 +29,6 @@ tifffile>=2023.7.10
 pandas>=2.0.0
 requests>=2.31.0
 tqdm>=4.65.0
-pathlib2>=2.3.7
 
 # Google Drive download utility
 gdown>=4.7.1
-
-# Additional utilities
-json5>=0.9.14
-tempfile-fast>=0.1.0
-zipfile38>=0.0.3
-
-# Optional: For better performance
-numba>=0.57.0
