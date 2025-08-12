@@ -35,7 +35,6 @@ pathlib2>=2.3.7
 gdown>=4.7.1
 
 # Additional utilities
-base64
 json5>=0.9.14
 tempfile-fast>=0.1.0
 zipfile38>=0.0.3
