@@ -574,7 +574,7 @@ def load_water_model(model_path):
         
         # Initialize your water segmentation model architecture here
         # Modify this based on your specific model architecture
-        model = smp.Unetplusplus(
+        model = smp.UnetPlusPlus(
             encoder_name='efficientnet-b3',
             encoder_weights=None,
             in_channels=6,  # 6 bands for water detection (B2, B3, B4, B8, B11, B12)
