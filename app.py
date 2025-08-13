@@ -843,52 +843,90 @@ def process_water_detection(image_path, selected_polygon, region_number):
                     parts = filename.split('_')
                     i = int(parts[-2])
                     j = int(parts[-1].split('.')[0])
-                    
+            
                     # Read the patch (raw values, no scaling)
                     with rasterio.open(patch_path) as src:
                         patch = src.read()  # This will be in (C, H, W) format
                         patch_meta = src.meta.copy()
-                    
+            
+                    # Verify patch shape
+                    if patch.shape != (6, 224, 224):
+                        st.error(f"Unexpected patch shape: {patch.shape}. Expected (6, 224, 224)")
+                        continue
+            
                     # Create RGB version for display
                     rgb_bands = [2, 1, 0]  # B4, B3, B2
                     rgb_patch = np.zeros((patch.shape[1], patch.shape[2], 3), dtype=np.float32)
-                    
+            
                     for b, band in enumerate(rgb_bands):
                         if band < patch.shape[0]:
                             band_data = patch[band]
                             min_val = np.percentile(band_data, 2)
                             max_val = np.percentile(band_data, 98)
                             rgb_patch[:, :, b] = np.clip((band_data - min_val) / (max_val - min_val), 0, 1)
-                    
-                    # Convert to torch tensor (keep raw values for model)
+            
+                    # Prepare tensor for model input
+                    # Ensure we have the correct number of channels (6 for water detection)
+                    if patch.shape[0] != 6:
+                        st.error(f"Model expects 6 channels, but patch has {patch.shape[0]} channels")
+                        continue
+            
+                    # Convert to torch tensor with proper normalization if needed
+                    # Check if your model expects normalized values (0-1) or raw values
                     img_tensor = torch.tensor(patch.astype(np.float32), dtype=torch.float32)
-                    img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
                     
+                    # Add batch dimension: (C, H, W) -> (1, C, H, W)
+                    img_tensor = img_tensor.unsqueeze(0)
+                    
+                    # Verify tensor shape before model inference
+                    expected_shape = (1, 6, 224, 224)
+                    if img_tensor.shape != expected_shape:
+                        st.error(f"Tensor shape mismatch: {img_tensor.shape}, expected {expected_shape}")
+                        continue
+            
+                    # Move to device
+                    img_tensor = img_tensor.to(st.session_state.device)
+            
                     # Perform water detection
-                    with torch.inference_mode():
-                        prediction = st.session_state.model(img_tensor.to(st.session_state.device))
+                    with torch.no_grad():  # Use no_grad instead of inference_mode for broader compatibility
+                        prediction = st.session_state.model(img_tensor)
                         prediction = torch.sigmoid(prediction).cpu()
-                    
+            
                     # Convert prediction to numpy
                     pred_np = prediction.squeeze().numpy()
                     
+                    # Handle different prediction shapes
+                    if pred_np.ndim == 3:  # Multi-class output
+                        # Assuming water class is at index 1
+                        pred_np = pred_np[1] if pred_np.shape[0] > 1 else pred_np[0]
+                    elif pred_np.ndim == 2:  # Single class output
+                        pass  # Already in correct format
+                    else:
+                        st.error(f"Unexpected prediction shape: {pred_np.shape}")
+                        continue
+            
                     # Create binary mask (threshold at 0.5)
                     water_mask = (pred_np > 0.5).astype(np.uint8) * 255
-                    
+            
+                    # Ensure water_mask is 2D
+                    if water_mask.ndim != 2:
+                        st.error(f"Water mask has unexpected dimensions: {water_mask.shape}")
+                        continue
+            
                     # Save water mask
                     output_filename = f"water_mask_region{region_number}_{i}_{j}.tif"
                     output_path = os.path.join(water_folder, output_filename)
                     water_paths.append(output_path)
-                    
+            
                     # Save as GeoTIFF
                     patch_meta.update({
                         'count': 1,
                         'dtype': 'uint8'
                     })
-                    
+            
                     with rasterio.open(output_path, 'w', **patch_meta) as dst:
                         dst.write(water_mask.reshape(1, water_mask.shape[0], water_mask.shape[1]))
-                    
+            
                     # Add to display list (limit to 6)
                     if len(water_results) < 6:
                         water_results.append({
@@ -898,12 +936,15 @@ def process_water_detection(image_path, selected_polygon, region_number):
                             'mask': water_mask,
                             'rgb_original': rgb_patch
                         })
-                    
+            
                     # Update detection progress
                     detect_progress.progress((idx + 1) / total_patches)
-                    
+            
                 except Exception as e:
                     st.error(f"Error processing patch {patch_path}: {str(e)}")
+                    import traceback
+                    st.error(f"Traceback: {traceback.format_exc()}")
+                    continue
             
             # Store water detection paths in session state
             st.session_state.water_paths = water_paths
