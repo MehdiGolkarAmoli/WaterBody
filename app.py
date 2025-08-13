@@ -491,13 +491,14 @@ def download_sentinel2_with_gees2(date, polygon, cloud_cover_limit=10):
 # Helper function to normalize image data
 def normalized(img):
     """Normalize image data to range [0, 1]"""
-    min_val = np.nanmin(img)
-    max_val = np.nanmax(img)
+    # min_val = np.nanmin(img)
+    # max_val = np.nanmax(img)
     
-    if max_val == min_val:
-        return np.zeros_like(img)
+    # if max_val == min_val:
+    #     return np.zeros_like(img)
     
-    img_norm = (img - min_val) / (max_val - min_val)
+    # img_norm = (img - min_val) / (max_val - min_val)
+    img_norm = img
     return img_norm
 
 # Function to determine UTM zone from longitude
