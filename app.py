@@ -576,7 +576,7 @@ def load_water_model(model_path):
         # Modify this based on your specific model architecture
         model = smp.UnetPlusPlus(
             encoder_name='efficientnet-b3',
-            encoder_weights='ImageNet',
+            encoder_weights='imagenet',
             in_channels=6,  # 6 bands for water detection (B2, B3, B4, B8, B11, B12)
             classes=2,
             activation=None
